@@ -18,6 +18,7 @@ rldc-lite/
 ├── envs/peg_in_hole_env.py    # gymnasium 환경
 ├── scripts/train_ppo.py       # PPO 학습 스크립트 (SubprocVecEnv, 체크포인트/재개 지원)
 ├── scripts/collect_data.py    # 학습된 정책으로 롤아웃 데이터 수집
+├── scripts/render_video.py    # 학습된(또는 랜덤) 정책 롤아웃을 mp4로 렌더링
 ├── requirements.txt
 └── README.md
 ```
@@ -86,6 +87,27 @@ rldc-lite/
 - 모든 배열의 0번째 축이 스텝(T)이므로, 나중에 LeRobotDataset의
   프레임 단위 필드로 그대로 매핑하기 쉽다.
 
+## 영상 렌더링 스크립트 (scripts/render_video.py)
+
+- `--model-path`를 주면 학습된 정책, 안 주면 랜덤 정책 롤아웃을 mp4로 렌더링한다
+  (baseline 비교용).
+- 디스플레이가 없는(headless) 환경에서는 소프트웨어 렌더러가 필요하므로 기본적으로
+  `MUJOCO_GL=osmesa`를 쓴다. GPU + EGL이 있는 환경이면
+  `MUJOCO_GL=egl python scripts/render_video.py ...`로 바꿔서 더 빠르게 렌더링할 수 있다.
+- **중요한 주의사항**: OSMesa 렌더러를 만든 *뒤에* `torch`(stable-baselines3가 의존)를
+  import하면 세그폴트가 난다 (OSMesa와 torch의 OpenMP 스레드 초기화 충돌로 추정).
+  그래서 이 스크립트는 항상 정책(또는 torch)을 먼저 로드하고 나서 `mujoco.Renderer`를
+  생성한다 — 이 스크립트를 참고해서 직접 렌더링 코드를 짤 때도 같은 순서를 지킬 것.
+
+```bash
+# osmesa 소프트웨어 렌더러에 필요한 시스템 라이브러리 (Colab/Ubuntu 기준)
+!apt-get -qq install -y libosmesa6 libgl1
+
+MUJOCO_GL=osmesa python scripts/render_video.py \
+    --model-path ./checkpoints/ppo_peg_in_hole_final.zip \
+    --out-path ./videos/success.mp4 --seed 42
+```
+
 ## Colab 실행 순서
 
 ```bash
@@ -115,6 +137,12 @@ drive.mount('/content/drive')
     --model-path /content/drive/MyDrive/rldc-lite/checkpoints/ppo_peg_in_hole_final.zip \
     --n-episodes 500 \
     --out-dir /content/drive/MyDrive/rldc-lite/data/peg_in_hole
+
+# 6. (선택) 학습된 정책 롤아웃을 영상으로 확인
+!apt-get -qq install -y libosmesa6 libgl1
+!MUJOCO_GL=osmesa python scripts/render_video.py \
+    --model-path /content/drive/MyDrive/rldc-lite/checkpoints/ppo_peg_in_hole_final.zip \
+    --out-path /content/drive/MyDrive/rldc-lite/videos/success.mp4
 ```
 
 ## 검증 (직접 실행 결과)
@@ -137,6 +165,15 @@ python으로 실행해서 확인했다.
    `actions (100,4)`, `forces (100,3)`, `torques (100,3)`, `rewards (100,)`,
    `success ()` 확인), `--keep-failures` 없이는 실패 에피소드가 저장되지
    않음을 확인.
+5. **실제 PPO 학습 200,000 스텝 (n_envs=4, CPU 4코어)**: `ep_rew_mean`이
+   -155 → +220으로, `ep_len_mean`이 200(타임아웃)에서 ~100~110스텝으로
+   개선됨(삽입 성공 시 조기 종료되므로 짧아지는 것은 좋은 신호). 학습 후
+   별도 시드로 50 에피소드 평가 시 **성공률 43/50 (86%)**, 성공 에피소드는
+   평균 약 45~50스텝 만에 삽입 완료.
+6. **render_video.py로 실제 영상 렌더링 확인**: 학습된 정책은 42스텝 만에
+   삽입 성공(`insertion_depth=0.0250~0.0285m`), 랜덤 정책은 150스텝 내내
+   삽입 깊이 0으로 실패 — 두 mp4를 육안으로 비교해 정책이 실제로 정렬 후
+   삽입 동작을 학습했음을 확인.
 
 ## 지금 임시로 되어있는 부분 (TODO)
 
