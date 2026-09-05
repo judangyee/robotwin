@@ -23,6 +23,12 @@ _ROT_STEP = 0.05   # rad / control step
 _TARGET_INSERTION_DEPTH = 0.025  # m
 _SUCCESS_TOLERANCE = 0.0  # depth >= target 이면 성공 (목표 자체가 이미 여유를 둔 값)
 
+# hole 벽 구조물의 실제 바깥쪽 footprint half-width. assets/peg_in_hole.xml의
+# hole_wall_* geom들의 size(outer_half=0.0195)와 반드시 일치해야 한다 — 이 값
+# 바깥은 벽이 전혀 없는 완전한 허공이므로, insertion_depth를 xy 정렬 없이도
+# 인정해버리는 리워드 해킹 구멍이 된다 (자세한 설명은 _get_info 참고).
+_HOLE_OUTER_HALF_WIDTH = 0.0195  # m
+
 # 도메인 무작위화 범위
 _HOLE_POS_JITTER_XY = 0.004   # m
 _HOLE_POS_JITTER_Z = 0.002    # m
@@ -210,7 +216,18 @@ class PegInHoleEnv(gym.Env):
         hole_center_pos = self.data.site_xpos[self._hole_site_id]
         relative_vec = hole_center_pos - peg_tip_pos
         # 삽입 깊이: peg tip이 hole opening 평면(hole_center z)보다 얼마나 아래 있는지.
-        insertion_depth = max(0.0, float(hole_center_pos[2] - peg_tip_pos[2]))
+        # 주의: z 깊이만 보면 xy 정렬 없이 hole 벽 구조물 바깥(허공)으로 그냥
+        # z를 내리꽂아도 "삽입"으로 잘못 인정되는 리워드 해킹이 가능하다 (실제로
+        # PPO가 이 구멍을 찾아냈다). 그래서 peg tip이 hole 벽 구조물의 실제
+        # 바깥쪽 footprint(_HOLE_OUTER_HALF_WIDTH, assets/peg_in_hole.xml의 벽
+        # geom size와 일치해야 함) 안에 있을 때만 depth를 인정한다. 이 footprint
+        # 안쪽(hole 내부거나 벽 위)에서는 실제 벽 충돌 물리가 이미 잘못된 진입을
+        # 막아주므로, 이 게이트는 "벽 구조물이 아예 없는 완전한 허공"만 걸러낸다.
+        dx = float(hole_center_pos[0] - peg_tip_pos[0])
+        dy = float(hole_center_pos[1] - peg_tip_pos[1])
+        xy_within_hole_footprint = abs(dx) < _HOLE_OUTER_HALF_WIDTH and abs(dy) < _HOLE_OUTER_HALF_WIDTH
+        raw_depth = max(0.0, float(hole_center_pos[2] - peg_tip_pos[2]))
+        insertion_depth = raw_depth if xy_within_hole_footprint else 0.0
         force = self.data.sensordata[self._force_slice].copy()
         torque = self.data.sensordata[self._torque_slice].copy()
         return {
