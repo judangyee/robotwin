@@ -1,9 +1,23 @@
 <mujoco model="peg_in_hole_lite">
   <!--
-    RLDC-lite peg-in-hole: 단순화된 4-DoF 팔 (slide x/y/z + wrist hinge) 이 강체로
-    고정된 사각 peg를 4벽 소켓(hole)에 삽입하는 태스크.
+    RLDC-lite peg-in-hole: SCARA형 다관절 팔 (shoulder/elbow 회전 조인트 2개 +
+    삽입용 prismatic z + wrist 회전) 이 강체로 고정된 사각 peg를 4벽 소켓(hole)에
+    삽입하는 태스크. SCARA(수평 다관절) 구성은 실제 산업용 peg-in-hole 삽입
+    작업에도 흔히 쓰이는 형태다.
 
-    좌표계 메모 (env가 그대로 가정하는 값들, 모델을 고치면 env도 같이 확인할 것):
+    기구학 메모 (env(envs/peg_in_hole_env.py)가 그대로 가정하는 값들 — 이 값들을
+    XML에서 바꾸면 env의 _SHOULDER_MOUNT_XY / _L1 / _L2 상수도 반드시 같이 고칠 것):
+      - shoulder 관절(= upper_arm 바디 원점)은 world (-0.11, 0, 0.15)에 고정.
+      - upper_arm 길이 L1=0.08m, forearm 길이 L2=0.08m. 둘 다 z축 회전(hinge)이라
+        end-effector의 (x,y)는 이 두 각도의 2-link 평면 기구학으로 정해진다.
+        env는 "delta cartesian (x,y)" action을 받아서 내부적으로 closed-form
+        2-link 역기구학(IK)으로 (shoulder, elbow) 목표각을 계산해 액추에이터에
+        넣는다 — 실제 오퍼레이셔널 스페이스 컨트롤러와 같은 방식.
+      - forearm 끝에 prismatic "slide_z"(삽입 깊이 축)와 hinge "hinge_wrist"
+        (peg 자세 정렬용)가 순서대로 붙어 있음 — 이 부분은 이전 gantry 버전과
+        동일한 구조/치수를 그대로 유지.
+
+    좌표계 메모 (hole/peg 관련, 이전과 동일):
       - hole_socket 바디는 조인트가 없는 고정 바디. 도메인 무작위화 시 Python에서
         model.body_pos[hole_id]를 직접 덮어쓰고 mj_forward로 재계산한다.
       - hole 개구부(opening) 평면은 hole_socket 로컬 z=0, 바닥은 z=-0.04.
@@ -21,7 +35,7 @@
 
   <default>
     <default class="arm_link">
-      <geom type="box" contype="0" conaffinity="0" rgba="0.6 0.6 0.65 1"/>
+      <geom contype="0" conaffinity="0" rgba="0.6 0.6 0.65 1"/>
       <joint damping="5" armature="0.01"/>
     </default>
     <default class="wrist_joint">
@@ -49,28 +63,30 @@
       <site name="hole_center_site" pos="0 0 0" size="0.002" rgba="1 0 0 0.5"/>
     </body>
 
-    <!-- 단순화된 4-DoF 팔: 직교 슬라이드 x,y,z + wrist hinge.
-         각 캐리지 바디에는 실제 조인트 이동 범위를 덮는 얇은 "레일" 시각 geom을
-         추가로 붙여서(질량은 무시할 만큼 작게 줘서 물리에는 영향 없음), 팔이
-         서로 연결되지 않은 채 허공에 뜬 조각들처럼 보이지 않고 갠트리(gantry)형
-         구조로 보이게 한다. -->
-    <body name="arm_base" pos="0 0 0.15">
+    <!-- SCARA형 4-DoF 팔: shoulder(회전) -> elbow(회전) -> slide_z(삽입) -> wrist(회전). -->
+    <body name="arm_base" pos="-0.11 0 0.15" childclass="arm_link">
       <geom class="arm_link" size="0.015 0.015 0.005" rgba="0.2 0.2 0.2 1"/>
-      <geom class="arm_link" name="rail_x" type="box" pos="0 0 0" size="0.037 0.006 0.006" rgba="0.35 0.35 0.4 1" mass="0.001"/>
-      <body name="carriage_x" pos="0 0 0" gravcomp="1">
-        <joint name="slide_x" type="slide" axis="1 0 0" range="-0.03 0.03"/>
-        <geom class="arm_link" size="0.014 0.014 0.014" mass="0.2" rgba="0.75 0.25 0.25 1"/>
-        <geom class="arm_link" name="rail_y" type="box" pos="0 0 0" size="0.006 0.037 0.006" rgba="0.35 0.35 0.4 1" mass="0.001"/>
-        <body name="carriage_y" pos="0 0 0" gravcomp="1">
-          <joint name="slide_y" type="slide" axis="0 1 0" range="-0.03 0.03"/>
-          <geom class="arm_link" size="0.013 0.013 0.013" mass="0.2" rgba="0.25 0.6 0.3 1"/>
-          <geom class="arm_link" name="rail_z" type="box" pos="0 0 -0.055" size="0.006 0.006 0.078" rgba="0.35 0.35 0.4 1" mass="0.001"/>
-          <body name="carriage_z" pos="0 0 0" gravcomp="1">
+      <body name="upper_arm" pos="0 0 0" gravcomp="1">
+        <joint name="shoulder" type="hinge" axis="0 0 1" range="-1.65 0.1"/>
+        <geom class="arm_link" name="shoulder_pivot" type="sphere" size="0.013" rgba="0.75 0.25 0.25 1" mass="0.05"/>
+        <geom class="arm_link" name="upper_arm_link" type="capsule" fromto="0 0 0  0.08 0 0" size="0.009" rgba="0.7 0.7 0.72 1" mass="0.15"/>
+        <body name="forearm" pos="0.08 0 0" gravcomp="1">
+          <joint name="elbow" type="hinge" axis="0 0 1" range="0.4 2.3"/>
+          <geom class="arm_link" name="elbow_pivot" type="sphere" size="0.011" rgba="0.25 0.6 0.3 1" mass="0.04"/>
+          <geom class="arm_link" name="forearm_link" type="capsule" fromto="0 0 0  0.08 0 0" size="0.008" rgba="0.7 0.7 0.72 1" mass="0.12"/>
+          <!-- z 삽입축 레일 (시각 전용, 질량 무시할 만큼 작게): forearm 끝에 고정되어
+               slide_z 조인트의 실제 이동 범위를 보여준다. -->
+          <geom class="arm_link" name="rail_z" type="box" pos="0.08 0 -0.055" size="0.006 0.006 0.078" rgba="0.35 0.35 0.4 1" mass="0.001"/>
+          <body name="z_carriage" pos="0.08 0 0" gravcomp="1">
             <joint name="slide_z" type="slide" axis="0 0 1" range="-0.13 0.02"/>
-            <geom class="arm_link" size="0.012 0.012 0.012" mass="0.2" rgba="0.25 0.4 0.75 1"/>
+            <geom class="arm_link" type="box" size="0.012 0.012 0.012" mass="0.2" rgba="0.25 0.4 0.75 1"/>
             <body name="wrist" pos="0 0 0" gravcomp="1">
-              <joint name="hinge_wrist" class="wrist_joint" type="hinge" axis="0 0 1" range="-0.7 0.7"/>
-              <geom class="arm_link" size="0.009 0.009 0.015" mass="0.1" rgba="0.55 0.35 0.75 1"/>
+              <!-- range이 넓은 이유: peg의 절대 회전각은 shoulder+elbow+hinge_wrist의
+                   합(셋 다 같은 z축 회전이라 누적됨)이라서, env가 "peg 절대 각도를
+                   0 부근으로 유지"하려면 hinge_wrist가 shoulder+elbow 합(운용 구간에서
+                   대략 0.6~1.6 rad)을 상쇄할 수 있어야 한다. -->
+              <joint name="hinge_wrist" class="wrist_joint" type="hinge" axis="0 0 1" range="-2.15 0.6"/>
+              <geom class="arm_link" type="box" size="0.009 0.009 0.015" mass="0.1" rgba="0.55 0.35 0.75 1"/>
               <!-- peg: wrist 자식이지만 자체 조인트가 없음 -> 그리퍼에 강체로 고정된 것으로 취급 -->
               <body name="peg" pos="0 0 -0.03" gravcomp="1">
                 <geom class="contact" name="peg_geom" type="box" size="0.010 0.010 0.03" mass="0.05" rgba="0.95 0.35 0.05 1"/>
@@ -84,10 +100,10 @@
   </worldbody>
 
   <actuator>
-    <position name="act_x" joint="slide_x" kp="800" ctrlrange="-0.03 0.03"/>
-    <position name="act_y" joint="slide_y" kp="800" ctrlrange="-0.03 0.03"/>
+    <position name="act_shoulder" joint="shoulder" kp="120" ctrlrange="-1.65 0.1"/>
+    <position name="act_elbow" joint="elbow" kp="120" ctrlrange="0.4 2.3"/>
     <position name="act_z" joint="slide_z" kp="1000" ctrlrange="-0.13 0.02"/>
-    <position name="act_wrist" joint="hinge_wrist" kp="30" ctrlrange="-0.7 0.7"/>
+    <position name="act_wrist" joint="hinge_wrist" kp="30" ctrlrange="-2.15 0.6"/>
   </actuator>
 
   <sensor>

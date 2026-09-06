@@ -3,3 +3,4 @@ __pycache__/
 checkpoints/
 data/
 videos/
+MUJOCO_LOG.TXT
