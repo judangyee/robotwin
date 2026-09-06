@@ -62,6 +62,8 @@ _FRICTION_RANGE = (0.2, 0.8)  # peg geom sliding friction 무작위화 범위
 
 # 리워드 가중치 (범용: 거리 페널티 + 삽입 보상 + 과다접촉력 페널티 + 스텝 페널티 + 성공 보너스)
 _W_DIST = 20.0
+_W_WRIST = 5.0  # peg 절대 각도(0에서 벗어난 정도)에 대한 페널티. 이게 없으면
+                # 정책이 wrist를 맞춰야 한다는 신호를 전혀 못 받는다 (README 참고).
 _W_INSERT = 10.0
 _W_FORCE = 0.02
 _FORCE_SAFE_THRESHOLD = 15.0  # N, 이 이상 넘는 접촉력만 페널티
@@ -330,9 +332,12 @@ class PegInHoleEnv(gym.Env):
         insertion_depth = raw_depth if xy_within_hole_footprint else 0.0
         force = self.data.sensordata[self._force_slice].copy()
         torque = self.data.sensordata[self._torque_slice].copy()
+        wrist_xmat = self.data.xmat[self._wrist_body_id]
+        wrist_angle = float(np.arctan2(wrist_xmat[3], wrist_xmat[0]))
         return {
             "distance": float(np.linalg.norm(relative_vec)),
             "insertion_depth": insertion_depth,
+            "wrist_angle": wrist_angle,
             "force": force,
             "torque": torque,
             "force_norm": float(np.linalg.norm(force)),
@@ -340,6 +345,10 @@ class PegInHoleEnv(gym.Env):
 
     def _compute_reward(self, info: dict[str, Any]) -> tuple[float, bool]:
         distance_penalty = -_W_DIST * info["distance"]
+        # wrist 정렬 페널티: 이게 없으면 정책이 peg 절대 각도를 맞춰야 한다는
+        # 신호를 전혀 못 받는다 (README "SCARA 버그" 항목 참고 — xy가 완벽해도
+        # wrist가 틀어지면 물리적으로 삽입이 안 된다).
+        wrist_penalty = -_W_WRIST * abs(info["wrist_angle"])
         insertion_progress = min(1.0, info["insertion_depth"] / _TARGET_INSERTION_DEPTH)
         insertion_reward = _W_INSERT * insertion_progress
         excess_force = max(0.0, info["force_norm"] - _FORCE_SAFE_THRESHOLD)
@@ -347,7 +356,7 @@ class PegInHoleEnv(gym.Env):
         step_penalty = -_W_STEP
 
         success = info["insertion_depth"] >= _TARGET_INSERTION_DEPTH - _SUCCESS_TOLERANCE
-        reward = distance_penalty + insertion_reward + force_penalty + step_penalty
+        reward = distance_penalty + wrist_penalty + insertion_reward + force_penalty + step_penalty
         if success:
             reward += _SUCCESS_BONUS
         return float(reward), success
