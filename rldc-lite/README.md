@@ -14,7 +14,7 @@ MuJoCo 기반 강화학습 데이터 수집 파이프라인의 축소 재현체.
 
 ```
 rldc-lite/
-├── assets/peg_in_hole.xml     # MuJoCo 모델 (4-DoF 팔 + peg + hole 소켓)
+├── assets/peg_in_hole.xml     # MuJoCo 모델 (SCARA형 4-DoF 팔 + peg + hole 소켓)
 ├── envs/peg_in_hole_env.py    # gymnasium 환경
 ├── scripts/train_ppo.py       # PPO 학습 스크립트 (SubprocVecEnv, 체크포인트/재개 지원)
 ├── scripts/collect_data.py    # 학습된 정책으로 롤아웃 데이터 수집
@@ -25,9 +25,13 @@ rldc-lite/
 
 ## 모델 개요 (assets/peg_in_hole.xml)
 
-- **팔**: slide(x) → slide(y) → slide(z) → hinge(wrist, z축 회전) 순서로 연결된
-  단순화된 4-DoF 팔. 각 조인트는 position actuator로 구동되며, RL action은 이
-  actuator의 목표값에 대한 델타(증분)로 들어간다.
+- **팔**: SCARA형(수평 다관절) 4-DoF. shoulder(회전) → elbow(회전) → slide_z
+  (삽입용 prismatic) → wrist(회전, peg 자세 정렬용) 순서로 연결된다. shoulder는
+  world (-0.11, 0, 0.15)에 고정, upper_arm/forearm 길이는 각각 8cm. 실제
+  산업용 peg-in-hole 삽입 작업에도 흔히 쓰이는 구성이다. (처음엔 x/y/z가 전부
+  독립 슬라이드인 갠트리 구조였는데, 렌더링해서 보니 "로봇 팔처럼 안 생겼다"는
+  피드백을 받고 이 SCARA 구성으로 다시 만들었다 — 검증 섹션 7번 참고.)
+  각 조인트는 position actuator로 구동된다.
 - **peg**: wrist 바디의 자식이지만 그 자체는 조인트가 없음 → 그리퍼에 강체로
   고정된 것으로 취급. 사각 단면, half-width 10mm.
 - **hole**: 4개의 벽 세그먼트(picture-frame 형태) + 바닥으로 이루어진 소켓.
@@ -44,13 +48,23 @@ rldc-lite/
 ## gymnasium 환경 (envs/peg_in_hole_env.py)
 
 - **action** `Box(-1, 1, shape=(4,))`: delta position(x,y,z) + delta wrist
-  rotation. 내부적으로 스텝당 최대 이동량(위치 3mm, 회전 0.05rad)으로 스케일된
-  뒤 actuator ctrl에 누적/클리핑된다.
+  rotation — SCARA로 바뀐 뒤에도 인터페이스는 그대로다. 내부적으로는:
+  - xy는 "shoulder 기준 상대좌표 목표점"에 델타를 누적한 뒤, 매 스텝
+    closed-form 2-link 역기구학(IK, `_ik_2link`)으로 (shoulder, elbow) 목표각을
+    구해서 액추에이터에 넣는다 — 실제 로봇의 오퍼레이셔널 스페이스 컨트롤러와
+    같은 방식.
+  - wrist는 "peg 절대 각도 목표"에 델타를 누적한 뒤, 그 순간의 shoulder+elbow
+    각도 합을 상쇄하도록 hinge_wrist 목표각을 역산해서 넣는다 — shoulder/elbow/
+    hinge_wrist가 전부 같은 z축 회전이라 peg의 절대 회전각은 셋의 합이기 때문
+    (검증 섹션 7번 버그 참고).
+  - z는 이전과 동일하게 델타를 그대로 ctrl에 누적.
 - **observation** `Box(shape=(19,))` — 아래 벡터들을 실제로 concat한 뒤
   `len()`으로 shape을 계산하므로(하드코딩 아님) 필드를 추가/삭제해도 shape이
   자동으로 맞는다:
   - ee_pos (3) — wrist 바디 world position
-  - wrist (1) — wrist hinge 각도
+  - wrist (1) — **peg의 절대 회전각**(wrist 바디의 실제 회전행렬에서 추출).
+    `hinge_wrist` 조인트값 자체가 아님에 주의 — SCARA 구조에서는 shoulder+elbow
+    회전도 누적되므로 조인트값만으론 실제 방향을 알 수 없다.
   - peg_tip_pos (3)
   - hole_center_pos (3)
   - relative_vec (3) = hole_center_pos - peg_tip_pos
@@ -178,32 +192,62 @@ python으로 실행해서 확인했다.
    0으로 게이팅하도록 고쳤다. 고친 뒤: xy 오차를 보정하는 P-제어 정책은
    여전히 성공(xy 오프셋 ~0.6mm)하고, 정렬 없이 그냥 내리꽂는 정책은
    더 이상 성공하지 않음을 확인.
-6. **버그 수정 후 재학습 (400,000 스텝, n_envs=4, CPU 4코어)**: 진짜 태스크가
-   훨씬 어려워져서(더 이상 편법이 없음) `ep_rew_mean`이 -166 → -82 정도로만
-   개선되고 `ep_len_mean`은 대부분 에피소드 내내 200(타임아웃)에 머물렀다.
-   별도 시드로 30 에피소드 평가 시 **성공률 2/30 (6.7%)** — 이전의 가짜
-   86%와 달리 이번엔 정직한 수치다. `render_video.py`로 실제 성공
+6. **버그 수정 후 재학습 (400,000 스텝, n_envs=4, CPU 4코어, gantry 버전)**:
+   진짜 태스크가 훨씬 어려워져서(더 이상 편법이 없음) `ep_rew_mean`이 -166 →
+   -82 정도로만 개선되고 `ep_len_mean`은 대부분 에피소드 내내 200(타임아웃)에
+   머물렀다. 별도 시드로 30 에피소드 평가 시 **성공률 2/30 (6.7%)** — 이전의
+   가짜 86%와 달리 이번엔 정직한 수치다. `render_video.py`로 실제 성공
    에피소드(53스텝, `insertion_depth=0.0261m`) 영상을 확인해 이번엔 진짜로
-   peg가 hole에 들어가는 것을 눈으로 확인했다. PPO 하이퍼파라미터/리워드
-   가중치 튜닝이나 더 긴 학습 없이는 이 태스크(1.5mm 편측 clearance 정렬)를
-   안정적으로 풀기 어렵다는 뜻이므로, 리워드 shaping 개선(예: xy 정렬 자체에
-   대한 보상 추가)이나 학습 스텝 확대가 필요하다.
+   peg가 hole에 들어가는 것을 눈으로 확인했다.
+7. **팔을 SCARA(다관절)로 재설계하며 발견한 버그 2개**: "이거 로봇 팔 아니지
+   않냐"는 지적을 받고 슬라이드 3개짜리 갠트리를 shoulder+elbow 회전 조인트
+   기반 SCARA 팔로 바꾸는 과정에서, 스크립트 정책을 다시 돌려보니 두 가지
+   실제 버그가 드러났다:
+   - **댐핑 버그**: `shoulder`/`elbow`/`slide_z` 조인트에 `class="arm_link"`를
+     안 걸어놔서 damping=0으로 시뮬레이션되고 있었다. 회전 조인트 2개가
+     비선형으로 결합된 상태에서 이게 실제 물리 발산(QACC NaN 경고)을
+     일으켰다. `arm_base` 바디에 `childclass="arm_link"`를 걸어서 고쳤다.
+   - **wrist 관측/제어 버그**: peg의 절대 회전각은 shoulder+elbow+hinge_wrist
+     세 각도의 합인데(셋 다 같은 z축 회전), observation은 `hinge_wrist` 조인트
+     값만 읽고 있었고 도메인 무작위화도 그 값만 건드리고 있었다. 그 결과
+     정책은 peg가 실제로 몇 도 돌아가 있는지 전혀 관측할 방법이 없었고, 실제
+     로는 xy를 완벽히(15미크론 수준) 맞춰도 peg가 ~47° 돌아간 채로 4벽에 동시에
+     걸려서 전혀 삽입되지 않는 현상이 나타났다. `_get_obs()`에서 wrist 바디의
+     실제 회전행렬로부터 절대각을 직접 뽑고, `_solve_wrist()`에서
+     shoulder+elbow 기여분을 상쇄하도록 `hinge_wrist` ctrl을 역산하도록 고쳤다.
+   - 두 버그를 고친 뒤 P-제어(xy 정렬 + wrist를 0°로 정렬 + 삽입) 스크립트로
+     **20/20 (100%) 실제 삽입 성공**을 확인했다(xy 오차 0.01~0.4mm, wrist
+     ~0°, 접촉력 exploit도 여전히 차단됨).
+8. **SCARA 버그 수정 후 PPO 재학습 (400,000 스텝, n_envs=4)**: `ep_rew_mean`이
+   -176 → -111로 개선 추세는 있었지만, 별도 시드 30 에피소드 평가에서
+   **성공률 0/30 (0%)** — gantry 버전(6.7%)보다도 낮았다. IK를 거치는 SCARA
+   쪽이 같은 스텝 수로는 더 느리게 학습되는 것으로 보인다. 스크립트 정책으로는
+   태스크가 100% 풀리는 것을 이미 확인했으므로, 이건 "태스크가 불가능하다"가
+   아니라 "지금 하이퍼파라미터/스텝 수/리워드 shaping으로는 PPO가 아직
+   못 풀었다"는 뜻이다.
 
 ## 지금 임시로 되어있는 부분 (TODO)
 
-- **팔 모델이 실제 로봇이 아님**: `assets/peg_in_hole.xml`의 4-DoF
-  slide+hinge 팔은 실제 자작 로봇의 기구학을 전혀 반영하지 않은 placeholder다.
-  나중에 실제 로봇의 URDF(또는 MJCF로 변환한 버전)로 교체해야 하며, 그에 맞춰
-  observation의 `ee_pos`/`wrist` 정의와 action의 delta 스케일도 다시 잡아야 한다.
+- **팔이 여전히 실제 자작 로봇이 아님**: SCARA 구성으로 바꿔서 이제 최소한
+  "회전 조인트로 연결된 다관절 팔"이긴 하지만, 링크 길이(8cm x2)·조인트
+  범위·mount 위치는 전부 이 태스크가 풀리는 선에서 임의로 잡은 값이고 실제
+  로봇의 기구학과 무관하다. 나중에 실제 로봇의 URDF(또는 MJCF로 변환한
+  버전)로 교체해야 하며, 그에 맞춰 `_L1`/`_L2`/`_SHOULDER_MOUNT_XY`
+  (envs/peg_in_hole_env.py)와 IK 구현 자체(지금은 평면 2-link 전용 closed-form)
+  도 다시 짜야 한다. 만약 실제 로봇이 SCARA가 아니라 6-DOF 스페이셜 팔이라면
+  closed-form IK 대신 Jacobian 기반 수치 IK로 바꿔야 할 가능성이 높다.
 - **hole clearance(3mm)는 임의값**: 실제 태스크의 공차와 무관하게 "접촉이
   발생할 만큼 타이트한" 정도로 임의로 정한 수치다. 실제 하드웨어의 peg/hole
   공차에 맞게 다시 설정해야 한다.
 - **actuator 게인(kp)·질량·마찰 계수도 대략적인 값**: 물리적으로 캘리브레이션된
   값이 아니라 시뮬레이션이 안정적으로 도는 선에서 대충 잡은 값이다.
-- **PPO가 이 태스크를 안정적으로 풀지 못함**: 리워드 해킹을 막은 뒤 400,000
-  스텝 학습으로는 성공률 6.7%에 그쳤다(검증 섹션 5, 6번 참고). xy 정렬
-  자체에 대한 보상 항 추가, 학습 스텝 확대, curriculum(처음엔 clearance를
-  넓게 시작해서 점점 좁히기) 등을 시도해봐야 한다.
+- **PPO가 이 태스크를 아직 안정적으로 풀지 못함**: 리워드 해킹을 막은 뒤
+  gantry 버전은 400,000 스텝에 성공률 6.7%, SCARA로 바꾸고 관측/제어 버그를
+  고친 뒤에는 같은 400,000 스텝에 성공률 0%였다(검증 섹션 5~8번). 스크립트
+  정책으로는 태스크 자체가 100% 풀린다는 걸 확인했으니 태스크 난이도 문제가
+  아니라 학습 설정 문제다 — xy/wrist 정렬 자체에 대한 보상 항 추가, 학습
+  스텝을 훨씬 크게 확대(예: 200만+), curriculum(처음엔 clearance를 넓게
+  시작해서 점점 좁히기) 등을 시도해봐야 한다.
 - **gravcomp로 팔 자체 중력을 상쇄**: 제어를 단순화하기 위한 트릭이며, 실제
   로봇에는 이런 보상이 없을 수 있다(로봇 자체 컨트롤러가 이미 중력보상을
   하는 경우도 많으므로, 실제 하드웨어 교체 시 이 가정이 맞는지 확인 필요).
