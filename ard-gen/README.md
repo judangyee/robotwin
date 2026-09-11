@@ -12,6 +12,7 @@ ard-gen/
 ├── assets/peg_in_hole.xml       # MuJoCo 모델
 ├── sim/peg_in_hole_sim.py       # 시뮬레이션 실행 + admittance controller
 ├── optimize/cma_search.py       # CMA-ES 최적화 스크립트
+├── render_result.py             # seed_trajectory.npz의 게인으로 롤아웃을 mp4로 렌더링
 ├── requirements.txt
 └── README.md
 ```
@@ -138,6 +139,14 @@ python optimize/cma_search.py \
 - 수렴 곡선(`convergence.png`)은 5세대까지 평평하다가 6세대에서 수직으로
   치솟는 형태로, CMA-ES가 초기엔 실패만 하다가 스텝 크기를 키워가며 실제로
   좋은 영역을 찾아내는 과정을 보여준다.
+- `render_result.py`로 최종 게인의 실제 롤아웃을 mp4로 렌더링해서 육안으로도
+  확인함 (헤드리스 환경은 `MUJOCO_GL=osmesa` 필요, rldc-lite 프로젝트에서
+  검증한 것과 동일한 소프트웨어 렌더러):
+  ```bash
+  MUJOCO_GL=osmesa python render_result.py \
+      --seed-path ./seed_trajectory.npz --out-path ./result.mp4
+  ```
+  172스텝 만에 peg가 실제로 hole에 삽입되는 것을 영상으로 확인.
 
 ## 지금 임시로 되어있는/한계인 부분
 
