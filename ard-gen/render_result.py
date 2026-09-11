@@ -43,8 +43,8 @@ def main() -> None:
     renderer = mujoco.Renderer(sim.model, height=args.height, width=args.width)
     cam = mujoco.MjvCamera()
     cam.type = mujoco.mjtCamera.mjCAMERA_FREE
-    cam.lookat = [0, 0, 0.05]
-    cam.distance = 0.4
+    cam.lookat = [0.35, 0, 0.15]
+    cam.distance = 0.75
     cam.azimuth = 130
     cam.elevation = -18
 
@@ -68,7 +68,7 @@ def main() -> None:
         d_force_error_xy = (force_error_xy - prev_force_error_xy) / DT
         prev_force_error_xy = force_error_xy
         delta_xy = -kp_xy * force_error_xy - kd_xy * d_force_error_xy
-        delta = np.array([delta_xy[0], delta_xy[1], -Z_RATE, 0.0])
+        delta = np.array([delta_xy[0], delta_xy[1], -Z_RATE])
 
         sim.step(delta)
         renderer.update_scene(sim.data, camera=cam)

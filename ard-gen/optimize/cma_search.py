@@ -23,10 +23,11 @@ import numpy as np
 
 from sim.peg_in_hole_sim import PegInHoleSim, _run_episode_with_sim, _default_scene_config
 
-# 대표 평가 시나리오 3개: sim/peg_in_hole_sim.py에서 실측으로 확인한, "게인이
-# 있어야만 성공하는" 난이도의 오프셋들 (게인=0이면 전부 실패하거나 힘이 큼).
+# 대표 평가 시나리오 3개: sim/peg_in_hole_sim.py(VX300s 팔)에서 실측으로 확인한,
+# "게인이 있어야만 성공하는" 난이도의 오프셋들 (게인=0이면 전부 실패, Kp_xy=0.008
+# 이면 전부 성공했던 조합).
 EVAL_SCENE_CONFIGS: list[dict] = []
-for _offset in [(0.009, -0.006), (0.009, 0.007), (0.0095, -0.007)]:
+for _offset in [(0.006, 0.006), (0.0075, 0.0), (0.008, -0.002)]:
     _cfg = _default_scene_config()
     _cfg["peg_init_offset_xy"] = _offset
     EVAL_SCENE_CONFIGS.append(_cfg)

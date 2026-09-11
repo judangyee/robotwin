@@ -1,42 +1,7 @@
-<mujoco model="ard_gen_peg_in_hole_vx300s">
-  <!--
-    ARD-Gen 0단계(Seed 확보)용 peg-in-hole 모델. 실제 ALOHA 팔로워 팔인
-    Trossen ViperX 300 6DOF(VX300s, mujoco_menagerie의 공식 MJCF,
-    assets/vx300s/LICENSE 참고)를 그대로 가져다 쓰고, 그리퍼 끝에 peg를
-    강체로 고정한 뒤 hole에 삽입한다.
+<mujoco model="vx300s">
+  <compiler angle="radian" meshdir="assets" texturedir="assets" autolimits="true"/>
 
-    기구학 메모 (sim/peg_in_hole_sim.py가 그대로 가정하는 값들 — 바꾸면 sim도
-    같이 고칠 것):
-      - VX300s는 6개 회전 조인트(waist, shoulder, elbow, forearm_roll,
-        wrist_angle, wrist_rotate) + 손가락 2개. sim은 이 중 peg tip 위치
-        제어에 Jacobian 기반 damped-least-squares를 쓴다(2-link closed-form
-        IK를 썼던 이전 프로젝트와 달리, 6-DOF라 닫힌 형태 해가 마땅치 않음).
-      - "홈" 자세(waist=0, shoulder=1.0513, elbow=-1.3961, forearm_roll=0,
-        wrist_angle=1.9154, wrist_rotate=0)에서 그리퍼가 정확히 수직 아래를
-        향하도록 그리드 서치로 찾았다 — 이 자세에서 gripper_link의 로컬 +x축
-        (핀치 방향)이 world (0,0,-1)과 오차 0.0003 이내로 일치한다.
-      - peg는 gripper_link의 자식으로, "pinch" site(로컬 (0.1,0,0), VX300s
-        기본 제공 TCP)보다 로컬 +x 방향으로 0.07m 더 뻗어나간다(peg 바디
-        pos 0.13 + 샤프트 반길이 0.03 + 구형 tip 반지름 0.01). 홈 자세에서
-        peg tip world position ≈ (0.572, 0, 0.086).
-      - hole opening 평면은 world z=0.056 (홈 자세 peg tip 기준 3cm 아래
-        호버 간격), 바닥은 hole_socket 로컬 z=-0.057(월드 z≈-0.001)이라
-        목표 삽입 깊이 0.04m에 1.5cm 여유가 있다.
-      - shoulder/elbow는 frictionloss를 0으로 뺐다: 실측해보니 admittance
-        controller 한 스텝의 위치 변화량이 실제 VX300s의 정지마찰 임계값보다
-        작아서 조인트가 아예 안 움직이는 문제가 있었다(README 검증 섹션 참고).
-      - 팔의 각 바디에는 gravcomp="1"을 줘서 실제 로봇 무게 아래에서도
-        position controller가 자체 중력과 싸우지 않게 했다(실측해보니
-        gravcomp 없이는 이 pose에서 팔이 눈에 띄게 처졌다).
-      - fingers(left_finger/right_finger)는 grasp를 다루지 않으므로
-        키프레임 기본값 근처로 고정해두기만 한다 (peg는 gripper_link에
-        용접되듯 붙어 있어서 실제로 손가락이 peg를 쥐는 물리는 없음).
-  -->
-  <compiler angle="radian" meshdir="vx300s/assets" texturedir="vx300s/assets" autolimits="true"/>
   <option cone="elliptic" impratio="10"/>
-  <visual>
-    <headlight ambient="0.4 0.4 0.4" diffuse="0.6 0.6 0.6" specular="0.1 0.1 0.1"/>
-  </visual>
 
   <asset>
     <texture type="2d" file="interbotix_black.png"/>
@@ -63,14 +28,11 @@
         <position ctrlrange="-3.14158 3.14158" kp="25"/>
       </default>
       <default class="shoulder">
-        <!-- frictionloss(정지마찰)는 0으로 뺐다: 실측해보니 admittance
-             controller의 스텝당 위치 변화량이 이 정지마찰 임계값보다 작아서
-             조인트가 아예 안 움직이는 문제가 있었다 (README 검증 섹션 참고). -->
-        <joint range="-1.85005 1.25664" armature="0.004" damping="6.25"/>
+        <joint range="-1.85005 1.25664" armature="0.004" frictionloss="0.06" damping="6.25"/>
         <position ctrlrange="-1.85005 1.25664" kp="76" forcerange="-57 57"/>
       </default>
       <default class="elbow">
-        <joint range="-1.76278 1.6057" armature="0.072" damping="8.15"/>
+        <joint range="-1.76278 1.6057" armature="0.072" frictionloss="1.74" damping="8.15"/>
         <position ctrlrange="-1.76278 1.6057" kp="106" forcerange="-25 25"/>
       </default>
       <default class="forearm_roll">
@@ -99,88 +61,113 @@
         <geom type="mesh" contype="0" conaffinity="0" density="0" group="2" material="black"/>
       </default>
       <default class="collision">
-        <geom group="3" type="mesh" contype="0" conaffinity="0"/>
+        <geom group="3" type="mesh"/>
+        <default class="finger_collision">
+          <geom condim="4" solimp="2 1 0.01" solref="0.01 1" friction="1 0.005 0.0001"/>
+        </default>
       </default>
-    </default>
-    <default class="peg_contact">
-      <geom contype="1" conaffinity="1" condim="4" friction="0.5 0.01 0.001" solref="0.002 1" solimp="0.9 0.95 0.001"/>
     </default>
   </default>
 
   <worldbody>
-    <light pos="0.4 0 1" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
-    <light pos="0.7 -0.4 0.5" dir="-0.4 0.4 -0.7" diffuse="0.4 0.4 0.4"/>
-
-    <!-- 시각적 참조용 바닥/테이블 (충돌 없음) -->
-    <geom name="ground" type="plane" pos="0 0 -0.05" size="0.8 0.8 0.01" contype="0" conaffinity="0" rgba="0.5 0.5 0.52 1"/>
-
-    <!-- Hole: 조인트 없는 고정 소켓. clearance는 sim이 런타임에 geom_pos/geom_size를 덮어써서 바꾼다. -->
-    <body name="hole_socket" pos="0.572 0 0.056">
-      <geom class="peg_contact" name="hole_wall_px" type="box" pos="0.0155 0 -0.0275" size="0.004 0.0195 0.0275" rgba="0.55 0.55 0.6 1"/>
-      <geom class="peg_contact" name="hole_wall_nx" type="box" pos="-0.0155 0 -0.0275" size="0.004 0.0195 0.0275" rgba="0.55 0.55 0.6 1"/>
-      <geom class="peg_contact" name="hole_wall_py" type="box" pos="0 0.0155 -0.0275" size="0.0195 0.004 0.0275" rgba="0.55 0.55 0.6 1"/>
-      <geom class="peg_contact" name="hole_wall_ny" type="box" pos="0 -0.0155 -0.0275" size="0.0195 0.004 0.0275" rgba="0.55 0.55 0.6 1"/>
-      <geom class="peg_contact" name="hole_floor" type="box" pos="0 0 -0.057" size="0.0115 0.0115 0.002" rgba="0.55 0.55 0.6 1"/>
-      <site name="hole_center_site" pos="0 0 0" size="0.002" rgba="1 0 0 0.5"/>
-    </body>
-
+    <light mode="targetbodycom" target="gripper_link" pos="1 0 1"/>
     <body name="base_link" childclass="vx300s">
       <inertial pos="-0.0534774 -0.000562575 0.0205961" quat="-0.00292324 0.712517 0.00480387 0.701633" mass="0.969034"
         diaginertia="0.0071633 0.00602451 0.00169819"/>
       <geom quat="1 0 0 1" class="visual" mesh="vx300s_1_base"/>
-      <body name="shoulder_link" pos="0 0 0.079" gravcomp="1">
+      <geom quat="1 0 0 1" mesh="vx300s_1_base" class="collision"/>
+      <body name="shoulder_link" pos="0 0 0.079">
         <inertial pos="0.000259233 -3.3552e-06 0.0116129" quat="-0.476119 0.476083 0.52279 0.522826" mass="0.798614"
           diaginertia="0.00120156 0.00113744 0.0009388"/>
         <joint name="waist" class="waist"/>
         <geom pos="0 0 -0.003" quat="1 0 0 1" class="visual" mesh="vx300s_2_shoulder"/>
-        <body name="upper_arm_link" pos="0 0 0.04805" gravcomp="1">
+        <geom pos="0 0 -0.003" quat="1 0 0 1" mesh="vx300s_2_shoulder" class="collision"/>
+        <body name="upper_arm_link" pos="0 0 0.04805">
           <inertial pos="0.0206949 4e-10 0.226459" quat="0 0.0728458 0 0.997343" mass="0.792592"
             diaginertia="0.00911338 0.008925 0.000759317"/>
           <joint name="shoulder" class="shoulder"/>
           <geom quat="1 0 0 1" class="visual" mesh="vx300s_3_upper_arm"/>
-          <body name="upper_forearm_link" pos="0.05955 0 0.3" gravcomp="1">
+          <geom quat="1 0 0 1" class="collision" mesh="vx300s_3_upper_arm"/>
+          <body name="upper_forearm_link" pos="0.05955 0 0.3">
             <inertial pos="0.105723 0 0" quat="-0.000621631 0.704724 0.0105292 0.709403" mass="0.322228"
               diaginertia="0.00144107 0.00134228 0.000152047"/>
             <joint name="elbow" class="elbow"/>
             <geom class="visual" mesh="vx300s_4_upper_forearm"/>
-            <body name="lower_forearm_link" pos="0.2 0 0" gravcomp="1">
+            <geom class="collision" mesh="vx300s_4_upper_forearm"/>
+            <body name="lower_forearm_link" pos="0.2 0 0">
               <inertial pos="0.0513477 0.00680462 0" quat="-0.702604 -0.0796724 -0.702604 0.0796724" mass="0.414823"
                 diaginertia="0.0005911 0.000546493 0.000155707"/>
               <joint name="forearm_roll" class="forearm_roll"/>
               <geom quat="0 1 0 0" class="visual" mesh="vx300s_5_lower_forearm"/>
-              <body name="wrist_link" pos="0.1 0 0" gravcomp="1">
+              <geom quat="0 1 0 0" class="collision" mesh="vx300s_5_lower_forearm"/>
+              <body name="wrist_link" pos="0.1 0 0">
                 <inertial pos="0.046743 -7.6652e-06 0.010565" quat="-0.00100191 0.544586 0.0026583 0.8387"
                   mass="0.115395" diaginertia="5.45707e-05 4.63101e-05 4.32692e-05"/>
                 <joint name="wrist_angle" class="wrist_angle"/>
                 <geom quat="1 0 0 1" class="visual" mesh="vx300s_6_wrist"/>
-                <body name="gripper_link" pos="0.069744 0 0" gravcomp="1">
+                <geom quat="1 0 0 1" class="collision" mesh="vx300s_6_wrist"/>
+                <body name="gripper_link" pos="0.069744 0 0">
                   <inertial pos="0.0395662 -2.56311e-07 0.00400649" quat="0.62033 0.619916 -0.339682 0.339869"
                     mass="0.251652" diaginertia="0.000689546 0.000650316 0.000468142"/>
                   <joint name="wrist_rotate" class="wrist_rotate"/>
                   <geom pos="-0.02 0 0" quat="1 0 0 1" class="visual" mesh="vx300s_7_gripper"/>
+                  <geom pos="-0.02 0 0" quat="1 0 0 1" class="collision" mesh="vx300s_7_gripper"/>
                   <geom pos="-0.020175 0 0" quat="1 0 0 1" class="visual" mesh="vx300s_9_gripper_bar"/>
+                  <geom pos="-0.020175 0 0" quat="1 0 0 1" class="collision" mesh="vx300s_9_gripper_bar"/>
                   <site name="pinch" pos="0.1 0 0" size="0.005" rgba="0.6 0.3 0.3 1" group="5"/>
-                  <body name="left_finger_link" pos="0.0687 0 0" gravcomp="1">
+                  <body name="gripper_prop_link" pos="0.0485 0 0">
+                    <inertial pos="0.002378 2.85e-08 0" quat="0 0 0.897698 0.440611" mass="0.008009"
+                      diaginertia="4.2979e-06 2.8868e-06 1.5314e-06"/>
+                    <geom pos="-0.0685 0 0" quat="1 0 0 1" class="visual" mesh="vx300s_8_gripper_prop"/>
+                    <geom pos="-0.0685 0 0" quat="1 0 0 1" class="collision" mesh="vx300s_8_gripper_prop"/>
+                  </body>
+                  <body name="left_finger_link" pos="0.0687 0 0">
                     <inertial pos="0.017344 -0.0060692 0" quat="0.449364 0.449364 -0.54596 -0.54596" mass="0.034796"
                       diaginertia="2.48003e-05 1.417e-05 1.20797e-05"/>
                     <joint name="left_finger" class="left_finger"/>
                     <geom pos="-0.0404 -0.0575 0" quat="-1 1 -1 1" class="visual" mesh="vx300s_10_gripper_finger"/>
+                    <geom class="finger_collision" type="box" name="left_finger_pad_0" size="0.01405 0.01405 0.001"
+                      pos="0.0478 -0.0125 0.0106" quat="0.65 0.65 -0.27 0.27"/>
+                    <geom class="finger_collision" type="box" name="left_finger_pad_1" size="0.01405 0.01405 0.001"
+                      pos="0.0478 -0.0125 -0.0106" quat="0.65 0.65 -0.27 0.27"/>
+                    <geom class="finger_collision" type="box" name="left_finger_pad_2" size="0.01058 0.01058 0.001"
+                      pos="0.0571 -0.0125 0.0" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="left_finger_pad_3" size="0.01 0.0105 0.001"
+                      pos="0.0378 -0.0125 0.0" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="left_finger_pad_4" size="0.015 0.0105 0.001"
+                      pos="0.0128 -0.0125 0.0" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="left_finger_pad_5" size="0.01 0.0105 0.001"
+                      pos="0.0378 -0.0125 0.02" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="left_finger_pad_6" size="0.015 0.0105 0.001"
+                      pos="0.0128 -0.0125 0.02" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="left_finger_pad_7" size="0.01 0.0105 0.001"
+                      pos="0.0378 -0.0125 -0.02" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="left_finger_pad_8" size="0.015 0.0105 0.001"
+                      pos="0.0128 -0.0125 -0.02" quat="1 1 0 0"/>
                   </body>
-                  <body name="right_finger_link" pos="0.0687 0 0" gravcomp="1">
+                  <body name="right_finger_link" pos="0.0687 0 0">
                     <inertial pos="0.017344 0.0060692 0" quat="0.44937 -0.44937 0.545955 -0.545955" mass="0.034796"
                       diaginertia="2.48002e-05 1.417e-05 1.20798e-05"/>
                     <joint name="right_finger" class="right_finger"/>
                     <geom pos="-0.0404 0.0575 0" quat="1 1 1 1" class="visual" mesh="vx300s_10_gripper_finger"/>
-                  </body>
-                  <!-- peg: gripper_link 자식이지만 자체 조인트가 없음 -> 그리퍼에 강체로
-                       고정된 것으로 취급(grasp 자체는 다루지 않음). pinch site 위치에서
-                       로컬 +x(핀치 방향)로 더 뻗어나간다. tip이 구형인 이유는 다른
-                       ard-gen 모델과 동일 — 평평한 바닥은 접촉 normal이 항상 수직이라
-                       admittance controller가 반응할 xy 힘 신호를 못 만든다. -->
-                  <body name="peg" pos="0.13 0 0" gravcomp="1">
-                    <geom class="peg_contact" name="peg_shaft" type="box" size="0.03 0.01 0.01" mass="0.04" rgba="0.95 0.35 0.05 1"/>
-                    <geom class="peg_contact" name="peg_tip_ball" type="sphere" pos="0.03 0 0" size="0.01" mass="0.01" rgba="0.95 0.35 0.05 1"/>
-                    <site name="peg_tip_site" pos="0.04 0 0" size="0.003" rgba="0 1 0 1"/>
+                    <geom class="finger_collision" type="box" name="right_finger_pad_0" size="0.01405 0.01405 0.001"
+                      pos="0.0478 0.0125 0.0106" quat="0.65 0.65 -0.27 0.27"/>
+                    <geom class="finger_collision" type="box" name="right_finger_pad_1" size="0.01405 0.01405 0.001"
+                      pos="0.0478 0.0125 -0.0106" quat="0.65 0.65 -0.27 0.27"/>
+                    <geom class="finger_collision" type="box" name="right_finger_pad_2" size="0.01058 0.01058 0.001"
+                      pos="0.0571 0.0125 0.0" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="right_finger_pad_3" size="0.01 0.0105 0.001"
+                      pos="0.0378 0.0125 0.0" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="right_finger_pad_4" size="0.015 0.0105 0.001"
+                      pos="0.0128 0.0125 0.0" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="right_finger_pad_5" size="0.01 0.0105 0.001"
+                      pos="0.0378 0.0125 0.02" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="right_finger_pad_6" size="0.015 0.0105 0.001"
+                      pos="0.0128 0.0125 0.02" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="right_finger_pad_7" size="0.01 0.0105 0.001"
+                      pos="0.0378 0.0125 -0.02" quat="1 1 0 0"/>
+                    <geom class="finger_collision" type="box" name="right_finger_pad_8" size="0.015 0.0105 0.001"
+                      pos="0.0128 0.0125 -0.02" quat="1 1 0 0"/>
                   </body>
                 </body>
               </body>
@@ -209,8 +196,7 @@
     <exclude body1="base_link" body2="shoulder_link"/>
   </contact>
 
-  <sensor>
-    <force name="peg_force" site="peg_tip_site"/>
-    <torque name="peg_torque" site="peg_tip_site"/>
-  </sensor>
+  <keyframe>
+    <key name="home" qpos="0 -0.96 1.16 0 -0.3 0 0.024 -0.024" ctrl="0 -0.96 1.16 0 -0.3 0 0.024"/>
+  </keyframe>
 </mujoco>
