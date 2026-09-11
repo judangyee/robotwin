@@ -1,0 +1,117 @@
+<mujoco model="ard_gen_peg_in_hole">
+  <!--
+    ARD-Gen 0단계(Seed 확보)용 peg-in-hole 모델. 단순화된 3-DoF 슬라이드(x,y,z)
+    + 1 hinge(wrist) 팔이 강체로 고정된 사각 peg를 4벽 소켓(hole)에 삽입한다.
+    admittance controller(sim/peg_in_hole_sim.py)가 이 모델 위에서 동작한다.
+
+    좌표계/치수 메모 (sim이 그대로 가정하는 값들 — 바꾸면 sim의 상수도 같이 고칠 것):
+      - arm_base는 world (0, 0, 0.15)에 고정. slide_x/y/z, hinge_wrist 순서로
+        연결되고, 각 조인트는 독립적인(=서로 결합되지 않는) position actuator로
+        구동된다 (SCARA와 달리 회전 조인트가 없어 wrist 절대각이 곧 hinge_wrist
+        조인트값이다 — 관련 버그를 rldc-lite에서 이미 겪었기 때문에 일부러
+        이 단순한 슬라이드 구성을 유지한다).
+      - peg tip은 wrist 원점 기준 -0.08m(길이 8cm짜리 peg의 절반씩 두 번:
+        peg 바디 -0.04, tip site 추가 -0.04). qpos 전부 0일 때 peg tip world
+        z = 0.15 - 0.08 = 0.07 (hole opening 평면 z=0 위 7cm).
+      - hole opening(개구부) 평면은 hole_socket 로컬 z=0, 바닥은 z=-0.055
+        (목표 삽입 깊이 0.04m에 1.5cm 여유를 둔 값).
+      - hole 벽 4개(hole_wall_*)의 위치/크기는 clearance를 결정하는 값이라,
+        sim이 scene_config['clearance_m']에 따라 실행 시점에
+        model.geom_pos / model.geom_size를 직접 덮어쓴다 (아래 값은 nominal
+        clearance 3mm 기준의 초기값일 뿐).
+      - peg half-width = 0.010m. hole opening half-width(inner_half) = 0.0115m
+        (nominal) => 편측 clearance 1.5mm, 총 지름 clearance 3mm.
+      - 회전 조인트가 없으므로 damping=0 버그가 나지 않지만, 그래도 실수
+        방지를 위해 arm_base에 childclass="arm_link"를 걸어 모든 조인트가
+        명시적으로 damping/armature를 받도록 한다.
+  -->
+  <compiler angle="radian" inertiafromgeom="true"/>
+  <option timestep="0.002" integrator="implicitfast" cone="elliptic" impratio="10" gravity="0 0 -9.81"/>
+  <visual>
+    <headlight ambient="0.4 0.4 0.4" diffuse="0.6 0.6 0.6" specular="0.1 0.1 0.1"/>
+  </visual>
+
+  <default>
+    <default class="arm_link">
+      <geom type="box" contype="0" conaffinity="0" rgba="0.6 0.6 0.65 1"/>
+      <joint damping="5" armature="0.01"/>
+    </default>
+    <default class="wrist_joint">
+      <joint damping="0.5" armature="0.002"/>
+    </default>
+    <default class="contact">
+      <geom contype="1" conaffinity="1" condim="4" friction="0.5 0.01 0.001" solref="0.002 1" solimp="0.9 0.95 0.001"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <light pos="0 0 1" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <light pos="0.3 -0.3 0.4" dir="-0.6 0.6 -0.8" diffuse="0.4 0.4 0.4"/>
+
+    <!-- 시각적 참조용 바닥 (충돌 없음, 순수 렌더링 배경) -->
+    <geom name="ground" type="plane" pos="0 0 -0.2" size="0.3 0.3 0.01" contype="0" conaffinity="0" rgba="0.5 0.5 0.52 1"/>
+
+    <!-- Hole: 조인트 없는 고정 소켓. 4개 벽 세그먼트(picture-frame) + 바닥.
+         clearance는 sim이 런타임에 geom_pos/geom_size를 덮어써서 바꾼다. -->
+    <body name="hole_socket" pos="0 0 0">
+      <geom class="contact" name="hole_wall_px" type="box" pos="0.0155 0 -0.0275" size="0.004 0.0195 0.0275" rgba="0.55 0.55 0.6 1"/>
+      <geom class="contact" name="hole_wall_nx" type="box" pos="-0.0155 0 -0.0275" size="0.004 0.0195 0.0275" rgba="0.55 0.55 0.6 1"/>
+      <geom class="contact" name="hole_wall_py" type="box" pos="0 0.0155 -0.0275" size="0.0195 0.004 0.0275" rgba="0.55 0.55 0.6 1"/>
+      <geom class="contact" name="hole_wall_ny" type="box" pos="0 -0.0155 -0.0275" size="0.0195 0.004 0.0275" rgba="0.55 0.55 0.6 1"/>
+      <geom class="contact" name="hole_floor" type="box" pos="0 0 -0.057" size="0.0115 0.0115 0.002" rgba="0.55 0.55 0.6 1"/>
+      <site name="hole_center_site" pos="0 0 0" size="0.002" rgba="1 0 0 0.5"/>
+    </body>
+
+    <!-- 단순화된 4-DoF 팔: 직교 슬라이드 x,y,z + wrist hinge (서로 결합되지
+         않음). 각 캐리지에는 실제 조인트 이동 범위를 덮는 얇은 "레일" 시각
+         geom을 붙여서(질량은 무시할 만큼 작게) 팔이 서로 연결되지 않은 채
+         허공에 뜬 조각들처럼 보이지 않게 한다. -->
+    <body name="arm_base" pos="0 0 0.15" childclass="arm_link">
+      <geom size="0.015 0.015 0.005" rgba="0.2 0.2 0.2 1"/>
+      <geom name="rail_x" type="box" pos="0 0 0" size="0.037 0.006 0.006" rgba="0.35 0.35 0.4 1" mass="0.001"/>
+      <body name="carriage_x" pos="0 0 0" gravcomp="1">
+        <joint name="slide_x" type="slide" axis="1 0 0" range="-0.03 0.03"/>
+        <geom size="0.014 0.014 0.014" mass="0.2" rgba="0.75 0.25 0.25 1"/>
+        <geom name="rail_y" type="box" pos="0 0 0" size="0.006 0.037 0.006" rgba="0.35 0.35 0.4 1" mass="0.001"/>
+        <body name="carriage_y" pos="0 0 0" gravcomp="1">
+          <joint name="slide_y" type="slide" axis="0 1 0" range="-0.03 0.03"/>
+          <geom size="0.013 0.013 0.013" mass="0.2" rgba="0.25 0.6 0.3 1"/>
+          <geom name="rail_z" type="box" pos="0 0 -0.06" size="0.006 0.006 0.08" rgba="0.35 0.35 0.4 1" mass="0.001"/>
+          <body name="carriage_z" pos="0 0 0" gravcomp="1">
+            <joint name="slide_z" type="slide" axis="0 0 1" range="-0.15 0.02"/>
+            <geom size="0.012 0.012 0.012" mass="0.2" rgba="0.25 0.4 0.75 1"/>
+            <body name="wrist" pos="0 0 0" gravcomp="1">
+              <joint name="hinge_wrist" class="wrist_joint" type="hinge" axis="0 0 1" range="-0.7 0.7"/>
+              <geom size="0.009 0.009 0.015" mass="0.1" rgba="0.55 0.35 0.75 1"/>
+              <!-- peg: wrist 자식이지만 자체 조인트가 없음 -> 그리퍼에 강체로 고정된 것으로 취급.
+                   tip을 구형(반지름 = peg half-width)으로 만든 이유: 평평한
+                   박스 바닥이 벽 윗면(둘 다 수평면)에 닿으면 접촉 normal이
+                   항상 수직이라 xy 방향 힘이 전혀 안 생긴다 (기하학적으로
+                   당연함) — admittance controller가 반응할 신호 자체가
+                   없어진다. 실제 핀/커넥터에 흔한 라운드/챔퍼 팁과 같은
+                   이유로 구형 팁을 붙여서, 오프셋 상태로 벽에 닿아도 접촉
+                   normal에 xy 성분이 생기게 한다 (검증 섹션 참고). -->
+              <body name="peg" pos="0 0 -0.03" gravcomp="1">
+                <geom class="contact" name="peg_shaft" type="box" size="0.010 0.010 0.03" mass="0.04" rgba="0.95 0.35 0.05 1"/>
+                <geom class="contact" name="peg_tip_ball" type="sphere" pos="0 0 -0.03" size="0.010" mass="0.01" rgba="0.95 0.35 0.05 1"/>
+                <site name="peg_tip_site" pos="0 0 -0.04" size="0.003" rgba="0 1 0 1"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="act_x" joint="slide_x" kp="800" ctrlrange="-0.03 0.03"/>
+    <position name="act_y" joint="slide_y" kp="800" ctrlrange="-0.03 0.03"/>
+    <position name="act_z" joint="slide_z" kp="1000" ctrlrange="-0.15 0.02"/>
+    <position name="act_wrist" joint="hinge_wrist" kp="30" ctrlrange="-0.7 0.7"/>
+  </actuator>
+
+  <sensor>
+    <force name="peg_force" site="peg_tip_site"/>
+    <torque name="peg_torque" site="peg_tip_site"/>
+  </sensor>
+</mujoco>
