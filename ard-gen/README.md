@@ -46,13 +46,17 @@ ard-gen/
   clearance 3mm(편측 1.5mm)지만, `scene_config['clearance_m']`에 따라 `sim`이
   런타임에 벽의 `geom_pos`/`geom_size`를 직접 덮어써서 바꾼다.
 - **카메라 2개** (`render_result.py --cameras`로 선택):
-  - `wrist_cam`: `gripper_link`에 고정, `mode="targetbody"`로 peg를 자동으로
-    바라봄 (그리퍼 몸체 메쉬에 가려지지 않게 옆으로 비껴서 배치).
-  - `top_cam`: hole 위를 내려다보는 **오블릭**(비스듬한) 탑 뷰. base-hole
-    거리가 10cm로 짧다 보니 접힌 upper_arm/forearm 링크(각각 30cm/20cm)가
-    hole 바로 위 공간을 차지해서, 순수 수직 top view로는 hole이 거의 안
-    보인다(실측 확인 — 카메라 버그가 아니라 이 reach에서 이 팔이 실제로
-    저렇게 접히는 것). 그래서 옆에서 비스듬히 내려다보도록 배치했다.
+  - `wrist_cam`: `gripper_link`에 **고정 장착**(`mode="fixed"`), 그리퍼의
+    작동(삽입) 방향인 로컬 +x축에 **수직**으로 시선을 둔다 — peg가 hole로
+    들어가는 과정을 옆에서 보는 프로파일 뷰. 그리퍼가 움직여도 이 상대
+    각도는 안 바뀐다(진짜 손목에 붙은 카메라처럼 co-move).
+  - `top_cam`: **로봇 정면(+x, 팔이 뻗어나가는 방향)에서 로봇 쪽을
+    마주보는** 오블릭(비스듬한) 뷰(world 고정, `mode="targetbody"`로 hole을
+    자동으로 바라봄). base-hole 거리가 10cm로 짧다 보니 접힌 upper_arm/
+    forearm 링크(각각 30cm/20cm)가 hole 바로 위 공간을 차지해서, 순수 수직
+    top view로는 hole이 거의 안 보인다(실측 확인 — 카메라 버그가 아니라 이
+    reach에서 이 팔이 실제로 저렇게 접히는 것). 그래서 로봇 앞쪽에서
+    마주보는 각도로 배치했다.
 - **F/T 센서**: `peg_tip_site`에 3축 force + 3축 torque.
 - 목표 삽입 깊이는 0.04m.
 - fingers(그리퍼 손가락)는 grasp를 다루지 않으므로 키프레임 기본값 근처로

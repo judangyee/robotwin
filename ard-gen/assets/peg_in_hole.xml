@@ -24,11 +24,17 @@
       - hole opening 평면은 world z=0.0438 (홈 자세 peg tip 기준 3cm 아래
         호버 간격), 바닥은 hole_socket 로컬 z=-0.057이라 목표 삽입 깊이
         0.04m에 1.5cm 여유가 있다.
-      - 카메라 2개: wrist_cam(gripper_link에 고정, mode="targetbody"로 peg를
-        자동으로 바라봄), top_cam(hole 위를 비스듬히 내려다보는 오블릭 뷰 —
-        base-hole 거리가 10cm로 짧아서 접힌 upper_arm/forearm 링크가 순수
-        수직 top view를 거의 다 가려버리기 때문에, 일부러 옆으로 비껴서
-        내려다보게 했다. render_result.py --cameras로 렌더링).
+      - 카메라 2개 (render_result.py --cameras로 렌더링):
+        - wrist_cam: gripper_link에 고정 장착, 그리퍼의 작동(삽입) 방향인
+          로컬 +x축에 "수직"으로 시선을 둔다(로컬 -x/+z를 카메라 X/Y축으로
+          잡아서 -z가 로컬 +y를 보게 함) — peg가 hole로 들어가는 걸 옆에서
+          보는 프로파일 뷰. mode="fixed"라 그리퍼가 움직여도 이 상대 각도는
+          안 바뀐다.
+        - top_cam: mode="targetbody"target="hole_socket", world (0.28,0,0.32)
+          에 고정 — 로봇 정면(+x, 팔이 뻗어나가는 방향)에서 로봇 쪽을
+          마주보는 오블릭 앵글. base-hole 거리가 10cm로 짧아서 접힌
+          upper_arm/forearm 링크가 hole 바로 위를 가리기 때문에, 순수 수직
+          top view 대신 이 각도를 쓴다(실측 확인, 카메라 버그 아님).
       - shoulder/elbow는 frictionloss를 0으로 뺐다: 실측해보니 admittance
         controller 한 스텝의 위치 변화량이 실제 VX300s의 정지마찰 임계값보다
         작아서 조인트가 아예 안 움직이는 문제가 있었다(README 검증 섹션 참고).
@@ -121,8 +127,9 @@
     <!-- 시각적 참조용 바닥/테이블 (충돌 없음) -->
     <geom name="ground" type="plane" pos="0 0 -0.05" size="0.8 0.8 0.01" contype="0" conaffinity="0" rgba="0.5 0.5 0.52 1"/>
 
-    <!-- 탑 뷰 카메라: hole 바로 위 30cm에서 수직으로 내려다본다 (world 고정). -->
-    <camera name="top_cam" mode="targetbody" target="hole_socket" pos="0.10 0.22 0.32"/>
+    <!-- 오블릭 탑 뷰 카메라: 로봇 정면(+x)에서 로봇 쪽을 마주보며 hole을
+         내려다본다 (world 고정). 자세한 이유는 파일 상단 주석 참고. -->
+    <camera name="top_cam" mode="targetbody" target="hole_socket" pos="0.28 0 0.32"/>
 
     <!-- Hole: 조인트 없는 고정 소켓. clearance는 sim이 런타임에 geom_pos/geom_size를 덮어써서 바꾼다. -->
     <body name="hole_socket" pos="0.10 0 0.0438">
@@ -173,7 +180,7 @@
                   <!-- 손목(wrist) 카메라: gripper_link에 고정, 로컬 +x(peg가
                        뻗어나가는 방향, pinch 방향)를 바라본다. xyaxes로 카메라
                        -z(시선 방향)가 body +x가 되도록 맞췄다. -->
-                  <camera name="wrist_cam" mode="targetbody" target="peg" pos="0 0.15 0.1"/>
+                  <camera name="wrist_cam" mode="fixed" pos="0.13 0.15 0" xyaxes="-1 0 0 0 0 1"/>
                   <body name="left_finger_link" pos="0.0687 0 0" gravcomp="1">
                     <inertial pos="0.017344 -0.0060692 0" quat="0.449364 0.449364 -0.54596 -0.54596" mass="0.034796"
                       diaginertia="2.48003e-05 1.417e-05 1.20797e-05"/>
