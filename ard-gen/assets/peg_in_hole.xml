@@ -11,17 +11,24 @@
         wrist_angle, wrist_rotate) + 손가락 2개. sim은 이 중 peg tip 위치
         제어에 Jacobian 기반 damped-least-squares를 쓴다(2-link closed-form
         IK를 썼던 이전 프로젝트와 달리, 6-DOF라 닫힌 형태 해가 마땅치 않음).
-      - "홈" 자세(waist=0, shoulder=1.0513, elbow=-1.3961, forearm_roll=0,
-        wrist_angle=1.9154, wrist_rotate=0)에서 그리퍼가 정확히 수직 아래를
-        향하도록 그리드 서치로 찾았다 — 이 자세에서 gripper_link의 로컬 +x축
-        (핀치 방향)이 world (0,0,-1)과 오차 0.0003 이내로 일치한다.
+      - "홈" 자세(waist=0, shoulder=-0.8924, elbow=1.0534, forearm_roll=0,
+        wrist_angle=1.4093, wrist_rotate=0)는 그리퍼가 정확히 수직 아래를
+        향하면서 base(월드 원점) 기준 수평 거리 10cm 지점에 오도록 그리드
+        서치로 찾았다 — 이 자세에서 gripper_link의 로컬 +x축(핀치 방향)이
+        world (0,0,-1)과 오차 0.0005 이내로 일치하고, pinch site는 world
+        (0.10, 0, 0.144) 근처에 온다.
       - peg는 gripper_link의 자식으로, "pinch" site(로컬 (0.1,0,0), VX300s
         기본 제공 TCP)보다 로컬 +x 방향으로 0.07m 더 뻗어나간다(peg 바디
         pos 0.13 + 샤프트 반길이 0.03 + 구형 tip 반지름 0.01). 홈 자세에서
-        peg tip world position ≈ (0.572, 0, 0.086).
-      - hole opening 평면은 world z=0.056 (홈 자세 peg tip 기준 3cm 아래
-        호버 간격), 바닥은 hole_socket 로컬 z=-0.057(월드 z≈-0.001)이라
-        목표 삽입 깊이 0.04m에 1.5cm 여유가 있다.
+        peg tip world position ≈ (0.10, 0, 0.074).
+      - hole opening 평면은 world z=0.0438 (홈 자세 peg tip 기준 3cm 아래
+        호버 간격), 바닥은 hole_socket 로컬 z=-0.057이라 목표 삽입 깊이
+        0.04m에 1.5cm 여유가 있다.
+      - 카메라 2개: wrist_cam(gripper_link에 고정, mode="targetbody"로 peg를
+        자동으로 바라봄), top_cam(hole 위를 비스듬히 내려다보는 오블릭 뷰 —
+        base-hole 거리가 10cm로 짧아서 접힌 upper_arm/forearm 링크가 순수
+        수직 top view를 거의 다 가려버리기 때문에, 일부러 옆으로 비껴서
+        내려다보게 했다. render_result.py --cameras로 렌더링).
       - shoulder/elbow는 frictionloss를 0으로 뺐다: 실측해보니 admittance
         controller 한 스텝의 위치 변화량이 실제 VX300s의 정지마찰 임계값보다
         작아서 조인트가 아예 안 움직이는 문제가 있었다(README 검증 섹션 참고).
@@ -114,8 +121,11 @@
     <!-- 시각적 참조용 바닥/테이블 (충돌 없음) -->
     <geom name="ground" type="plane" pos="0 0 -0.05" size="0.8 0.8 0.01" contype="0" conaffinity="0" rgba="0.5 0.5 0.52 1"/>
 
+    <!-- 탑 뷰 카메라: hole 바로 위 30cm에서 수직으로 내려다본다 (world 고정). -->
+    <camera name="top_cam" mode="targetbody" target="hole_socket" pos="0.10 0.22 0.32"/>
+
     <!-- Hole: 조인트 없는 고정 소켓. clearance는 sim이 런타임에 geom_pos/geom_size를 덮어써서 바꾼다. -->
-    <body name="hole_socket" pos="0.572 0 0.056">
+    <body name="hole_socket" pos="0.10 0 0.0438">
       <geom class="peg_contact" name="hole_wall_px" type="box" pos="0.0155 0 -0.0275" size="0.004 0.0195 0.0275" rgba="0.55 0.55 0.6 1"/>
       <geom class="peg_contact" name="hole_wall_nx" type="box" pos="-0.0155 0 -0.0275" size="0.004 0.0195 0.0275" rgba="0.55 0.55 0.6 1"/>
       <geom class="peg_contact" name="hole_wall_py" type="box" pos="0 0.0155 -0.0275" size="0.0195 0.004 0.0275" rgba="0.55 0.55 0.6 1"/>
@@ -160,6 +170,10 @@
                   <geom pos="-0.02 0 0" quat="1 0 0 1" class="visual" mesh="vx300s_7_gripper"/>
                   <geom pos="-0.020175 0 0" quat="1 0 0 1" class="visual" mesh="vx300s_9_gripper_bar"/>
                   <site name="pinch" pos="0.1 0 0" size="0.005" rgba="0.6 0.3 0.3 1" group="5"/>
+                  <!-- 손목(wrist) 카메라: gripper_link에 고정, 로컬 +x(peg가
+                       뻗어나가는 방향, pinch 방향)를 바라본다. xyaxes로 카메라
+                       -z(시선 방향)가 body +x가 되도록 맞췄다. -->
+                  <camera name="wrist_cam" mode="targetbody" target="peg" pos="0 0.15 0.1"/>
                   <body name="left_finger_link" pos="0.0687 0 0" gravcomp="1">
                     <inertial pos="0.017344 -0.0060692 0" quat="0.449364 0.449364 -0.54596 -0.54596" mass="0.034796"
                       diaginertia="2.48003e-05 1.417e-05 1.20797e-05"/>

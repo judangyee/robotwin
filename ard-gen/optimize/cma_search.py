@@ -23,11 +23,11 @@ import numpy as np
 
 from sim.peg_in_hole_sim import PegInHoleSim, _run_episode_with_sim, _default_scene_config
 
-# 대표 평가 시나리오 3개: sim/peg_in_hole_sim.py(VX300s 팔)에서 실측으로 확인한,
-# "게인이 있어야만 성공하는" 난이도의 오프셋들 (게인=0이면 전부 실패, Kp_xy=0.008
-# 이면 전부 성공했던 조합).
+# 대표 평가 시나리오 3개: sim/peg_in_hole_sim.py(VX300s 팔, base-hole 거리
+# 10cm 자세)에서 실측으로 확인한, "게인이 있어야만 성공하는" 난이도의
+# 오프셋들 (게인=0이면 전부 실패, Kp_xy=0.0005면 전부 성공했던 조합).
 EVAL_SCENE_CONFIGS: list[dict] = []
-for _offset in [(0.006, 0.006), (0.0075, 0.0), (0.008, -0.002)]:
+for _offset in [(0.014, 0.0), (0.0099, 0.0099), (0.0099, -0.0099)]:
     _cfg = _default_scene_config()
     _cfg["peg_init_offset_xy"] = _offset
     EVAL_SCENE_CONFIGS.append(_cfg)
@@ -35,8 +35,8 @@ for _offset in [(0.006, 0.006), (0.0075, 0.0), (0.008, -0.002)]:
 # 대표 시나리오 중 seed_trajectory.npz에 저장할 "메인" 시나리오 (가장 어려운 것).
 PRIMARY_SCENE_CONFIG = EVAL_SCENE_CONFIGS[0]
 
-KP_BOUNDS = (0.0001, 0.03)
-KD_BOUNDS = (0.0, 0.002)
+KP_BOUNDS = (0.00002, 0.003)
+KD_BOUNDS = (0.0, 0.0005)
 
 
 def evaluate_gains(sims: list[PegInHoleSim], kp_xy: float, kd_xy: float) -> float:
@@ -66,13 +66,15 @@ def main() -> None:
     # 일부러 나쁜 초기 추정값 + 작은 초기 스텝 크기에서 시작한다 (Kp가 거의
     # 0에 가까움 -> 대표 시나리오들에서 전부 실패) — CMA-ES가 몇 세대에 걸쳐
     # 스텝 크기를 키워가며 실제로 좋은 게인을 찾아가는 과정을 보여주기 위함.
-    # sim 모듈 검증 결과상 진짜 좋은 값은 Kp_xy~0.003~0.012 부근이었다.
-    x0 = [0.0001, 0.000001]
+    # sim 모듈 검증 결과상 진짜 좋은 값은 Kp_xy~0.0002~0.001의 좁은 구간이고
+    # (base-hole 거리 10cm 자세에서는 그보다 크면 오히려 불안정해짐), 이 범위를
+    # 넘어서면 다시 실패한다.
+    x0 = [0.00003, 0.000001]
     sigma0 = 1.0  # CMA_stds로 좌표별 스케일을 따로 주므로 sigma0 자체는 1.0
 
     opts = {
         "bounds": [[KP_BOUNDS[0], KD_BOUNDS[0]], [KP_BOUNDS[1], KD_BOUNDS[1]]],
-        "CMA_stds": [0.0006, 0.00002],
+        "CMA_stds": [0.00008, 0.000008],
         "popsize": args.popsize,
         "maxiter": args.max_generations,
         "seed": args.seed,

@@ -49,16 +49,17 @@ _NOMINAL_CLEARANCE_M = 0.003  # 총 지름 clearance (편측 1.5mm)
 # VX300s 6개 팔 조인트 (fingers 제외). Jacobian 열 순서/ctrl 매핑에 이 순서를 쓴다.
 _ARM_JOINTS = ["waist", "shoulder", "elbow", "forearm_roll", "wrist_angle", "wrist_rotate"]
 
-# "홈" 자세: 그리퍼(peg 방향)가 정확히 수직 아래를 향하도록 그리드 서치로 찾은
-# 값 (오차 0.0003 이내로 world (0,0,-1)과 일치). assets/peg_in_hole.xml의
+# "홈" 자세: 그리퍼(peg 방향)가 정확히 수직 아래를 향하면서, base(월드 원점)
+# 기준 수평 거리 10cm 지점에 오도록 그리드 서치로 찾은 값 (방향 오차 0.0005
+# 이내로 world (0,0,-1)과 일치, reach 오차 0.3mm 이내). assets/peg_in_hole.xml의
 # hole_socket 위치가 이 자세의 peg tip 바로 아래(호버 간격 3cm)에 오도록
 # 맞춰져 있다 — 팔 mount 위치나 hole 위치를 바꾸면 이 값도 다시 찾아야 한다.
 _HOME_QPOS = {
     "waist": 0.0,
-    "shoulder": 1.05128,
-    "elbow": -1.39615,
+    "shoulder": -0.89237,
+    "elbow": 1.05339,
     "forearm_roll": 0.0,
-    "wrist_angle": 1.91538,
+    "wrist_angle": 1.40932,
     "wrist_rotate": 0.0,
 }
 
@@ -83,19 +84,19 @@ def _default_scene_config() -> dict[str, Any]:
 def sample_scene_config(rng: np.random.Generator) -> dict[str, Any]:
     """CMA-ES 평가/견고성 테스트용 무작위 scene_config 샘플러.
 
-    peg_init_offset_xy 범위(5.5~8mm)는 VX300s 팔로 바꾼 뒤 다시 실측해서 정한
-    값이다. 팔을 단순 슬라이드에서 VX300s(Jacobian 기반 오퍼레이셔널 스페이스
-    제어)로 바꾸면서 "게인이 있어야만 성공하는" 오프셋 구간이 이전(6~10mm)과
-    조금 달라졌다 — peg-hole 접촉 물리(구형 tip 등)는 그대로지만, 팔의 실제
-    조인트 게인/역기구학 특성이 달라지면서 정확히 같은 수치가 재현되지는
-    않았다(README 검증 섹션 참고)."""
+    peg_init_offset_xy 범위(반경 9~14mm, 각도 ±45°)는 base-hole 거리를 10cm로
+    맞춘 뒤(팔이 훨씬 접힌 자세) 다시 실측해서 정했다. 이 자세는 이전(reach
+    57cm)보다 peg tip의 구형 곡률에 의한 수동 자가정렬이 훨씬 잘 먹혀서, 실제로
+    "게인이 있어야만 성공하는" 오프셋이 반경 14mm 부근(±45° 방향)으로 밀려났다
+    — Kp_xy가 좁은 구간(대략 0.0002~0.001)을 벗어나면(0이든 너무 크든) 다시
+    실패한다(README 검증 섹션 참고)."""
+    angle = rng.uniform(-np.pi / 4, np.pi / 4)
+    radius = rng.uniform(0.009, 0.014)
     return {
         "hole_pos_xy": tuple(rng.uniform(-0.004, 0.004, size=2)),
         "friction": float(rng.uniform(0.2, 0.8)),
         "clearance_m": float(rng.uniform(0.0025, 0.0035)),
-        "peg_init_offset_xy": tuple(
-            rng.choice([-1.0, 1.0], size=2) * rng.uniform(0.0055, 0.008, size=2)
-        ),
+        "peg_init_offset_xy": (radius * np.cos(angle), radius * np.sin(angle)),
         "peg_init_wrist": 0.0,
         "target_insertion_depth": TARGET_INSERTION_DEPTH,
     }

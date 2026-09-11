@@ -33,17 +33,26 @@ ard-gen/
   범위/게인은 [google-deepmind/mujoco_menagerie](https://github.com/google-deepmind/mujoco_menagerie)
   의 `trossen_vx300s` 그대로이며, `assets/vx300s/LICENSE`(BSD-3-Clause,
   Trossen Robotics)를 함께 포함한다.
-- **홈 자세**: `waist=0, shoulder=1.0513, elbow=-1.3961, forearm_roll=0,
-  wrist_angle=1.9154, wrist_rotate=0` — 그리퍼(peg 방향)가 정확히 수직 아래를
-  향하도록(world (0,0,-1)과 오차 0.0003 이내) 그리드 서치로 찾았다.
+- **홈 자세**: `waist=0, shoulder=-0.8924, elbow=1.0534, forearm_roll=0,
+  wrist_angle=1.4093, wrist_rotate=0` — 그리퍼(peg 방향)가 정확히 수직 아래를
+  향하면서 **base(월드 원점) 기준 수평 거리 10cm** 지점에 오도록(world
+  (0,0,-1)과 오차 0.0005 이내) 그리드 서치로 찾았다.
 - **peg**: `gripper_link`의 자식이지만 자체 조인트가 없음 → 그리퍼에 강체로
   고정된 것으로 취급(grasp 자체는 다루지 않음). `pinch` site(VX300s 기본
   제공 TCP)보다 0.07m 더 뻗어나가며, **tip이 구형**(반지름 = peg half-width
   10mm) — 이유는 아래 "검증하며 알아낸 것들" 참고.
-- **hole**: 4개 벽 세그먼트 + 바닥으로 이루어진 소켓, world (0.572, 0, 0.056)
-  위치(홈 자세 peg tip 기준 호버 간격 3cm). nominal clearance 3mm(편측
-  1.5mm)지만, `scene_config['clearance_m']`에 따라 `sim`이 런타임에 벽의
-  `geom_pos`/`geom_size`를 직접 덮어써서 바꾼다.
+- **hole**: 4개 벽 세그먼트 + 바닥으로 이루어진 소켓, world (0.10, 0, 0.0438)
+  위치(base에서 수평 거리 10cm, 홈 자세 peg tip 기준 호버 간격 3cm). nominal
+  clearance 3mm(편측 1.5mm)지만, `scene_config['clearance_m']`에 따라 `sim`이
+  런타임에 벽의 `geom_pos`/`geom_size`를 직접 덮어써서 바꾼다.
+- **카메라 2개** (`render_result.py --cameras`로 선택):
+  - `wrist_cam`: `gripper_link`에 고정, `mode="targetbody"`로 peg를 자동으로
+    바라봄 (그리퍼 몸체 메쉬에 가려지지 않게 옆으로 비껴서 배치).
+  - `top_cam`: hole 위를 내려다보는 **오블릭**(비스듬한) 탑 뷰. base-hole
+    거리가 10cm로 짧다 보니 접힌 upper_arm/forearm 링크(각각 30cm/20cm)가
+    hole 바로 위 공간을 차지해서, 순수 수직 top view로는 hole이 거의 안
+    보인다(실측 확인 — 카메라 버그가 아니라 이 reach에서 이 팔이 실제로
+    저렇게 접히는 것). 그래서 옆에서 비스듬히 내려다보도록 배치했다.
 - **F/T 센서**: `peg_tip_site`에 3축 force + 3축 torque.
 - 목표 삽입 깊이는 0.04m.
 - fingers(그리퍼 손가락)는 grasp를 다루지 않으므로 키프레임 기본값 근처로
@@ -132,12 +141,22 @@ VX300s는 6개 조인트가 서로 결합돼 있어서(단순 슬라이드처럼
 6~10mm)과 달라졌다(5.5~8mm). peg-hole 접촉 물리 자체(구형 tip, clearance)는
 그대로지만 팔의 실제 조인트 특성이 다르므로 재보정이 필요했다.
 
+**base-hole 거리를 10cm로 좁힌 뒤 또 재보정**: 팔을 훨씬 접힌 자세로 바꾸자
+(reach 57cm → 10cm) 난이도 구간이 또 바뀌었다 — 이번엔 peg tip의 구형
+곡률에 의한 수동 자가정렬이 훨씬 잘 먹혀서 오프셋 8mm까지는 게인 없이도
+대부분 성공하고, **게인을 오히려 세게 주면 더 불안정해지는**(반경 6~9mm
+근방에서 Kp_xy가 클수록 실패) 정반대 경향까지 나타났다. 반경 14mm(±45°
+방향)로 오프셋을 키우자 다시 "게인 있어야 성공, 게인 0이면 실패"하는 구간이
+나왔고, 그마저도 Kp_xy가 대략 0.0002~0.001인 좁은 구간에서만 성공했다(그
+이상이면 다시 실패). 대표 시나리오와 CMA-ES 탐색 범위를 이 값으로 다시
+맞췄다.
+
 ## CMA-ES 최적화 (optimize/cma_search.py)
 
 - `cma` 패키지로 `[Kp_xy, Kd_xy]` 2차원을 탐색한다. 스케일이 크게 다른 두
   파라미터라 `CMA_stds` 옵션으로 좌표별 초기 스텝 크기를 따로 준다.
-- 매 세대, 실측으로 확인한 대표 시나리오 3개(오프셋 (6,6), (7.5,0),
-  (8,-2)mm — "게인 0이면 실패, Kp_xy=0.008이면 성공"을 확인한 조합) 각각에
+- 매 세대, 실측으로 확인한 대표 시나리오 3개(오프셋 (14,0), (9.9,9.9),
+  (9.9,-9.9)mm — "게인 0이면 실패, Kp_xy=0.0005면 성공"을 확인한 조합) 각각에
   대해 `run_episode()`를 돌려 리워드를 평균낸다.
 - 종료 조건: 평균 리워드가 `--threshold`에 도달 **하거나** `--max-generations`
   (기본 100)에 도달하면 멈춘다.
@@ -172,22 +191,21 @@ python optimize/cma_search.py \
     --out-path ./seed_trajectory.npz \
     --curve-path ./convergence.png
 
-# 결과 영상 확인 (헤드리스 환경은 MUJOCO_GL=osmesa 필요)
+# 결과 영상 확인 (헤드리스 환경은 MUJOCO_GL=osmesa 필요, 카메라 2개 각각 mp4로 저장)
 MUJOCO_GL=osmesa python render_result.py \
-    --seed-path ./seed_trajectory.npz --out-path ./result.mp4
+    --seed-path ./seed_trajectory.npz --out-dir . --cameras wrist_cam,top_cam
 ```
 
-## 실제 실행 결과 (VX300s 팔, 위 버그 3개 수정 후)
+## 실제 실행 결과 (base-hole 거리 10cm, 위 버그 3개 수정 후)
 
-- **수렴 여부**: 수렴함. 일부러 나쁜 초기 게인(`Kp_xy=0.00012`)에서 시작해서
-  1세대 47.84 → 2세대 48.09 → 3세대 48.42 → 4세대 48.93 → 5세대 48.91 →
-  **6세대 49.11**로 점진적으로 개선되며 threshold(49.0)에 도달해 조기 종료.
-- **최종 게인**: `Kp_xy ≈ 0.00118`, `Kd_xy ≈ 2.8e-06`
-- **성공 여부**: 최종 게인으로 메인 시나리오(오프셋 6mm/6mm) 재실행 결과
-  `success=True`, `insertion_depth=0.0405m`(목표 0.04m 초과 달성),
-  `max_force=6.6N`, `reward=49.46`
-- `render_result.py`로 148스텝 만에 peg가 실제로 hole에 삽입되는 것을
-  영상으로 확인함 — 실제 ALOHA 팔로워 팔(VX300s) 형상으로 렌더링됨.
+- **수렴 여부**: 수렴함. 일부러 나쁜 초기 게인(`Kp_xy=0.00003`)에서 시작해서
+  1세대 -4.09 → 2세대 -4.09 → 3세대 12.89 → 4세대 47.29 → 5~9세대 47.4 안팎
+  정체 → **10세대 49.18**로 threshold(49.0)에 도달해 조기 종료.
+- **최종 게인**: `Kp_xy ≈ 0.000515`, `Kd_xy ≈ 2.4e-05`
+- **성공 여부**: 최종 게인으로 메인 시나리오(오프셋 14mm/0mm) 재실행 결과
+  `success=True`, `insertion_depth=0.0405m`(목표 0.04m 초과 달성), `reward=49.36`
+- `render_result.py`로 131스텝 만에 peg가 실제로 hole에 삽입되는 것을
+  wrist_cam/top_cam 두 시점 모두에서 영상으로 확인함.
 
 ## 지금 임시로 되어있는/한계인 부분
 
@@ -195,9 +213,15 @@ MUJOCO_GL=osmesa python render_result.py \
   위치만 보정하고 wrist_angle/wrist_rotate/forearm_roll은 초기값 유지다.
   peg 초기 자세가 이미 정렬돼 있다고 가정한 것 — 실제로는 회전 오차도
   힘/토크 피드백으로 보정해야 할 수 있다.
-- **오프셋 5.5~8mm 범위에서만 검증됨**: 그 이상은 이 반응형(reactive) 제어
-  방식으로는 원래 못 푸는 문제다(스파이럴 서치 등 별도 탐색 동작이 필요).
-  이건 버그가 아니라 "순수 힘 피드백 admittance control"의 실제 한계다.
+- **오프셋 9~14mm(±45° 방향) 범위에서만 검증됨**: 이 범위/게인 구간을 벗어나면
+  (너무 작은 오프셋에서 게인을 세게 주거나, 너무 큰 오프셋) 다시 실패한다.
+  이건 버그가 아니라 "순수 힘 피드백 admittance control"의 실제 한계이자,
+  base-hole 거리를 10cm로 좁혀 팔이 접힌 자세일 때의 특성이다(reach가 바뀌면
+  또 재보정이 필요할 것).
+- **top_cam은 순수 수직 top view가 아님**: base-hole 거리 10cm에서는 접힌
+  팔 링크가 hole 바로 위를 가려서 순수 top view가 거의 안 보였다. 옆에서
+  비스듬히 내려다보는 오블릭 뷰로 타협했다 — reach를 늘리면(예: 15~20cm)
+  순수 top view도 다시 가능할 수 있다.
 - **hole clearance/actuator 게인/질량은 대략적인 값**: hole 위치·clearance·
   peg 치수는 이 태스크가 풀리는 선에서 임의로 잡았다(팔 자체의 관성/게인은
   VX300s 실측값을 그대로 씀). gravcomp와 shoulder/elbow의 frictionloss 제거는
