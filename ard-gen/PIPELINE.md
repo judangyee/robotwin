@@ -72,7 +72,9 @@ seed 하나만으로는 diffusion을 학습시킬 수 없으므로 두 단계로
   - 방식: `pipeline.scene_sampler.sample_scene_config()`로 씬 샘플링,
     seed 게인(Kp_xy, Kd_xy) 각각에 독립적으로 [0.5, 2.0]배 균등분포
     노이즈를 곱해서 `sim/peg_in_hole_sim.py`의 `run_episode()` 그대로 실행.
-    성공/실패 모두 저장(diffusion이 실패 조건도 학습해야 하므로).
+    성공/실패 모두 저장한다 — 2-B 구현 결과 diffusion 자체는 성공
+    샘플만으로 학습시켰지만(아래 참고), 실패 샘플도 조건(scene_config)
+    정규화 통계 계산에는 쓰인다.
   - 산출물: `data/bootstrap/bootstrap_dataset.npz` (1000건 기본)
   - **실제 실행 결과(N=1000, seed=0)**: 전체 성공률 76.0%. 성공 게인
     분포는 `Kp_xy` 평균 0.000649 (seed 0.000515보다 약간 큼), `Kd_xy`
@@ -83,9 +85,35 @@ seed 하나만으로는 diffusion을 학습시킬 수 없으므로 두 단계로
     실패군 0.507로 거의 차이가 없다 — 이 태스크에서 friction보다
     clearance/offset이 성공/실패를 가르는 훨씬 강한 신호라는 게 실측으로
     확인됨(설계 원칙 "margin 무작위화가 더 안정적인 신호"와 일치).
-- **2-B diffusion 가동 ⬜ 미구현**: 축적된 기록으로 diffusion 모델을
+- **2-B diffusion 가동 ✅ 완료**: 축적된 기록으로 diffusion 모델을
   학습시켜서, 새로운 씬 조건이 주어지면 랜덤 샘플링 대신 diffusion이
   성공 확률 높은 게인 조합을 직접 생성하도록 전환한다.
+  - 구현 위치: `pipeline/diffusion_gains.py`
+  - 모델: 조건(7차원: hole_pose 3 + friction 1 + clearance_m 1 +
+    peg_init_offset 2) + timestep을 받아 노이즈를 예측하는 작은 MLP
+    (`GainDiffusionNet`, hidden=128) + 표준 DDPM 스케줄
+    (`GaussianDiffusion`, T=100).
+  - **학습 데이터는 성공 샘플만 사용**(1000건 중 760건). 조건 정규화
+    통계(평균/표준편차)만 전체 1000건으로 계산 — 성공 샘플만으로
+    계산하면 "쉬운 씬" 쪽으로 치우친 통계가 나와서다. 실패까지 포함해서
+    diffusion을 학습시키는 classifier-guidance 방식도 검토했지만, 조건
+    7차원/출력 2차원짜리 저차원 문제에는 과한 복잡도라 판단해
+    "성공 사례만 보고 그 분포를 재현"하는 단순한 방식을 택함(자세한 이유는
+    스크립트 docstring 참고).
+  - 생성된 게인은 `optimize/cma_search.py`와 동일한 탐색 범위
+    (`Kp_xy∈[2e-5,3e-3]`, `Kd_xy∈[0,5e-4]`)로 clip해서 물리적으로 말이
+    안 되는 값(음수 등)을 방지.
+  - **실제 검증 결과**: 새 무작위 씬 100개(2-A 데이터 생성에 쓰지 않은
+    시드)에 대해 diffusion이 생성한 게인으로 직접 시뮬레이션 실행.
+    - 시드 999: **86.0%** (86/100)
+    - 시드 1234: **84.0%** (84/100)
+    - 시드 7777: **84.0%** (84/100)
+    - 2-A 부트스트래핑(무작위 노이즈) 베이스라인 **76.0%** 대비 세 시드
+      모두에서 **+8~10%p 일관되게 개선** — 우연이 아님을 확인.
+    - diffusion이 생성한 게인 분포는 `Kp_xy≈0.00064±0.00024`,
+      `Kd_xy≈3.2e-05±1.1e-05`로, 2-A의 성공 게인 분포(`Kp_xy` 평균
+      0.000649)와 비슷한 영역이지만 씬 조건에 따라 값을 조절해서 뽑는다는
+      점이 다르다(무작위 노이즈는 조건과 무관하게 넓게 뿌리기만 함).
 
 > `bootstrap/`(구 디렉토리, 행동 복제 MLP 정책)와 `pipeline/bootstrap.py`
 > (2-A)는 이름은 비슷하지만 다른 것이다 — 전자는 "force 상태 → 행동"을
@@ -134,11 +162,11 @@ MimicGen 방식:
 | (스코프 외) 부트스트랩 정책 실험 | `bootstrap/` | ✅ 완료 (2단계와는 무관, 별도 유지) |
 | 1단계 (공유 씬 설정) | `pipeline/scene_sampler.py` | ✅ 완료 |
 | 2-A (게인 부트스트래핑) | `pipeline/bootstrap.py`, `data/bootstrap/` | ✅ 완료 (N=1000, 성공률 76.0%) |
-| 2-B (diffusion) | — | ⬜ 미구현 |
+| 2-B (diffusion) | `pipeline/diffusion_gains.py`, `data/bootstrap/diffusion_gains.pt` | ✅ 완료 (검증 성공률 84~86%, 베이스라인 76% 대비 +8~10%p) |
 | 3단계 (Stabilizer 기하 변환) | — | ⬜ 미구현 |
 | 4단계 (동시 실행 & 필터링) | — | ⬜ 미구현 |
 | 5단계 (언어 라벨링) | — | ⬜ 미구현 |
 
-지금 저장소(`ard-gen/`)는 **오른팔(Actuator) 단일 팔, 0단계 + 1단계 +
-2-A단계까지** 구현된 상태다. 왼팔(Stabilizer) 자체가 아직 없고,
-2-B(diffusion) 이후는 전부 새로 설계/구현해야 한다.
+지금 저장소(`ard-gen/`)는 **오른팔(Actuator) 단일 팔, 0~2단계(0, 1, 2-A,
+2-B)까지** 구현된 상태다. 왼팔(Stabilizer) 자체가 아직 없고, 3단계
+이후는 전부 새로 설계/구현해야 한다.

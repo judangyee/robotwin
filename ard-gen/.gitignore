@@ -6,3 +6,4 @@ generalization_report*.json
 bootstrap/demonstrations.npz
 bootstrap/policy.pt
 data/bootstrap/*.npz
+data/bootstrap/*.pt
