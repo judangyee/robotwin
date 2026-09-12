@@ -6,9 +6,7 @@ MuJoCo 기반 peg-in-hole 태스크에서 admittance controller 게인을 CMA-ES
 부트스트래핑)의 입력이 된다.
 
 팔은 실제 **ALOHA 팔로워 팔인 Trossen ViperX 300 6DOF(VX300s)** 를 그대로 쓴다
-(mujoco_menagerie의 공식 MJCF, 메쉬 포함). 처음엔 단순화된 3-DoF 슬라이드 +
-1-hinge 플레이스홀더 팔로 만들었다가, "이거 무슨 로봇이냐"는 질문을 받고
-실제 로봇으로 교체했다 — 그 과정에서 진짜 로봇 팔(회전 조인트 6개, 관성/게인/
+(mujoco_menagerie의 공식 MJCF, 메쉬 포함). 그 과정에서 진짜 로봇 팔(회전 조인트 6개, 관성/게인/
 마찰이 실측값)을 쓸 때만 드러나는 문제 3가지를 실제로 겪고 고쳤다. 아래
 "팔을 ALOHA(VX300s)로 교체하며 겪은 것들" 섹션 참고.
 
