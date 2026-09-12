@@ -40,37 +40,58 @@ peg-in-hole 태스크를 최초로 성공시킨 궤적을 확보했다.
   99~100% 확인 (게인=0 베이스라인은 70~75%)
 - 부가 작업(스코프 밖이었지만 먼저 해봄): `bootstrap/`에 이 seed를
   행동 복제(behavior cloning)로 신경망 정책에 재현하는 실험 — 구조적
-  수정(bias-free, f(0)=0 보장) 후 성공률 100% 확인. 이 결과물이 2-A
-  단계의 "기록"으로 재활용 가능한지는 2-A 구현 시 판단.
+  수정(bias-free, f(0)=0 보장) 후 성공률 100% 확인. **2-A 구현 결과,
+  이 정책은 2단계와 목적이 달라 재사용하지 않기로 함** (아래 2-A 참고).
 
-### 1단계 — 공유 씬 설정 ⬜ 미구현
+### 1단계 — 공유 씬 설정 ✅ 완료
 
 매 에피소드마다 다음을 무작위로 샘플링한다:
-- hole 위치
-- 마찰계수
-- clearance
-- peg 초기 오프셋
+- hole 위치/자세: `hole_pose = (dx, dy, theta)`, dx/dy는 ±1cm, theta는
+  ±0.1rad(현재 sim은 아직 회전을 지원하지 않아 소비되지 않음 — 3단계용
+  선반영)
+- 마찰계수: 기준값(0.5)의 0.7~1.3배
+- clearance: 2mm~5mm (friction보다 넓게 — margin 무작위화가 더 안정적인
+  신호라는 원칙)
+- peg 초기 오프셋: ±1.5cm
 
-이 값을 2단계와 3단계에 **동일하게** 전달해서, Actuator와 Stabilizer가
-같은 물리적 세계를 공유하도록 한다. (`sim/peg_in_hole_sim.py`의
-`sample_scene_config()`가 이미 이 역할의 일부를 하고 있음 — 1단계
-구현 시 "공유"라는 목적에 맞게 재정리/확장이 필요할 수 있다.)
+- 구현 위치: `pipeline/scene_sampler.py` (`sample_scene_config()`,
+  `to_sim_scene_config()`)
+- `sim/peg_in_hole_sim.py`의 기존 `sample_scene_config()`/
+  `_default_scene_config()`는 CMA-ES 전용으로 남겨두고 건드리지 않음 —
+  파이프라인 공식 스키마는 `pipeline/scene_sampler.py` 쪽. `run_episode()`에
+  넘기려면 `to_sim_scene_config()`로 변환.
 
-### 2단계 — Actuator(오른팔) 증강: Diffusion ⬜ 미구현
+### 2단계 — Actuator(오른팔) 증강: Diffusion
 
 seed 하나만으로는 diffusion을 학습시킬 수 없으므로 두 단계로 나눈다.
 
-- **2-A 부트스트래핑**: seed 게인 주변에 넓은 랜덤 노이즈를 주고
+- **2-A 부트스트래핑 ✅ 완료**: seed 게인 주변에 넓은 랜덤 노이즈를 주고
   시뮬레이션을 반복 실행해서 `(씬 조건, 게인, 성공여부, force_profile)`
   기록을 대량으로 쌓는다.
-- **2-B diffusion 가동**: 축적된 기록으로 diffusion 모델을 학습시켜서,
-  새로운 씬 조건이 주어지면 랜덤 샘플링 대신 diffusion이 성공 확률
-  높은 게인 조합을 직접 생성하도록 전환한다.
+  - 구현 위치: `pipeline/bootstrap.py`
+  - 방식: `pipeline.scene_sampler.sample_scene_config()`로 씬 샘플링,
+    seed 게인(Kp_xy, Kd_xy) 각각에 독립적으로 [0.5, 2.0]배 균등분포
+    노이즈를 곱해서 `sim/peg_in_hole_sim.py`의 `run_episode()` 그대로 실행.
+    성공/실패 모두 저장(diffusion이 실패 조건도 학습해야 하므로).
+  - 산출물: `data/bootstrap/bootstrap_dataset.npz` (1000건 기본)
+  - **실제 실행 결과(N=1000, seed=0)**: 전체 성공률 76.0%. 성공 게인
+    분포는 `Kp_xy` 평균 0.000649 (seed 0.000515보다 약간 큼), `Kd_xy`
+    평균 3.19e-05. clearance로 4분위 나눠 보면 2.0~2.76mm 구간
+    성공률 64.4% → 4.22~5.00mm 구간 83.2%로 뚜렷하게 clearance가
+    넓을수록 성공률이 오른다. offset 크기도 성공군 평균 10.6mm vs
+    실패군 평균 14.7mm로 명확히 갈리는 반면, friction은 성공군 0.498 vs
+    실패군 0.507로 거의 차이가 없다 — 이 태스크에서 friction보다
+    clearance/offset이 성공/실패를 가르는 훨씬 강한 신호라는 게 실측으로
+    확인됨(설계 원칙 "margin 무작위화가 더 안정적인 신호"와 일치).
+- **2-B diffusion 가동 ⬜ 미구현**: 축적된 기록으로 diffusion 모델을
+  학습시켜서, 새로운 씬 조건이 주어지면 랜덤 샘플링 대신 diffusion이
+  성공 확률 높은 게인 조합을 직접 생성하도록 전환한다.
 
-> 주의: `bootstrap/`에 이미 만든 행동 복제(MLP) 정책은 이 2-A/2-B와
-> 목적이 다르다 — 그건 "force 상태 → 행동"을 흉내내는 정책이고, 여기
-> 2단계는 "씬 조건 → 좋은 게인"을 생성하는 diffusion이다. 재활용 여부는
-> 2단계 구현 시 별도로 판단.
+> `bootstrap/`(구 디렉토리, 행동 복제 MLP 정책)와 `pipeline/bootstrap.py`
+> (2-A)는 이름은 비슷하지만 다른 것이다 — 전자는 "force 상태 → 행동"을
+> 흉내내는 정책이고, 후자는 "씬 조건 → 게인이 성공하는지"를 기록해 2-B
+> diffusion의 학습 데이터를 만드는 것. 실제 구현해보니 서로 재사용할
+> 부분이 없어 별도로 유지한다.
 
 ### 3단계 — Stabilizer(왼팔) 증강: 기하 변환 ⬜ 미구현
 
@@ -110,14 +131,14 @@ MimicGen 방식:
 | 파이프라인 단계 | 관련 코드 | 상태 |
 |---|---|---|
 | 0단계 (Seed 확보) | `optimize/cma_search.py`, `sim/peg_in_hole_sim.py` | ✅ 완료 |
-| (스코프 외) 부트스트랩 정책 실험 | `bootstrap/` | ✅ 완료 (2단계와 재활용 관계는 미정) |
-| 1단계 (공유 씬 설정) | `sim/peg_in_hole_sim.py`의 `sample_scene_config()` 일부 재사용 예정 | ⬜ 미구현 |
-| 2-A (게인 부트스트래핑) | — | ⬜ 미구현 |
+| (스코프 외) 부트스트랩 정책 실험 | `bootstrap/` | ✅ 완료 (2단계와는 무관, 별도 유지) |
+| 1단계 (공유 씬 설정) | `pipeline/scene_sampler.py` | ✅ 완료 |
+| 2-A (게인 부트스트래핑) | `pipeline/bootstrap.py`, `data/bootstrap/` | ✅ 완료 (N=1000, 성공률 76.0%) |
 | 2-B (diffusion) | — | ⬜ 미구현 |
 | 3단계 (Stabilizer 기하 변환) | — | ⬜ 미구현 |
 | 4단계 (동시 실행 & 필터링) | — | ⬜ 미구현 |
 | 5단계 (언어 라벨링) | — | ⬜ 미구현 |
 
-지금 저장소(`ard-gen/`)는 **오른팔(Actuator) 단일 팔, 0단계까지만**
-구현된 상태다. 왼팔(Stabilizer)이 포함된 양팔 모델, 1단계 이후는 전부
-새로 설계/구현해야 한다.
+지금 저장소(`ard-gen/`)는 **오른팔(Actuator) 단일 팔, 0단계 + 1단계 +
+2-A단계까지** 구현된 상태다. 왼팔(Stabilizer) 자체가 아직 없고,
+2-B(diffusion) 이후는 전부 새로 설계/구현해야 한다.
