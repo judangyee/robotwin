@@ -7,3 +7,4 @@ bootstrap/demonstrations.npz
 bootstrap/policy.pt
 data/bootstrap/*.npz
 data/bootstrap/*.pt
+data/episodes/*.npz
