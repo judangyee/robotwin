@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 seed_trajectory.npz
 convergence.png
+generalization_report*.json
