@@ -3,3 +3,5 @@ __pycache__/
 seed_trajectory.npz
 convergence.png
 generalization_report*.json
+bootstrap/demonstrations.npz
+bootstrap/policy.pt

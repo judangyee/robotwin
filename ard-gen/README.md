@@ -243,6 +243,73 @@ admittance controller는 그 위에 "부족한 부분을 보완"하는 정도라
 97.9%, friction≤0.7 구간(252건)은 99.6%로 — 표본이 작아 단정하긴 이르지만
 방향은 일치한다. **높은 마찰에서 잼밍 위험이 남아있다는 게 정직한 한계다.**
 
+## 부트스트래핑 (bootstrap/) — ARD-Gen 2단계
+
+0단계에서 확보한 seed(admittance 게인 + 궤적)를 이용해, "힘 상태 -> 행동"을
+직접 흉내내는 신경망 정책을 시연 데이터로부터 학습(행동 복제, behavior
+cloning)한다. 3개 스크립트로 구성:
+
+```bash
+# 1) 검증된 게인으로 무작위 시나리오를 돌려 성공한 에피소드의 (상태,행동) 쌍을 모은다
+python bootstrap/collect_demonstrations.py --seed-path ./seed_trajectory.npz \
+    --n-episodes 300 --seed 7 --out-path ./bootstrap/demonstrations.npz
+
+# 2) 그 데이터로 작은 MLP를 지도학습시킨다
+python bootstrap/train_policy.py --data-path ./bootstrap/demonstrations.npz \
+    --out-path ./bootstrap/policy.pt --epochs 200
+
+# 3) evaluate_generalization.py와 동일한 시드/분포로 학습된 정책의 성공률을 잰다
+python bootstrap/evaluate_policy.py --policy-path ./bootstrap/policy.pt --n-trials 200 --seed 42
+```
+
+state = `[Fx, Fy, dFx/dt, dFy/dt]` (admittance controller가 실제로 보는 것과
+동일), action = `[Δx, Δy]`. z축은 이전과 동일하게 게인과 무관하게 일정
+속도로 내려간다(학습 대상이 아님).
+
+### 실제로 겪은 문제: 학습 지표는 완벽한데 배포하면 완전히 실패함
+
+처음 버전(평범한 MLP, bias 있는 Linear + 평균-중심화 정규화)은
+`demonstrations.npz`(300 에피소드, 39284 스텝, 성공률 99.3%)로 학습했을 때
+검증 MSE가 `1.7e-7`로 사실상 완벽했다. 그런데 이 정책을
+`evaluate_generalization.py`와 똑같은 조건(무작위 시나리오, 시드 42/123)에
+그대로 넣어 굴려보니 **성공률이 0.5%, 0.3%로 완전히 붕괴**했다.
+
+원인을 실제로 파고들어 보니: 힘이 정확히 0일 때(정지 상태) admittance
+공식의 정답은 `(0,0)`인데, 학습된 신경망은 이 지점에서 `(0.00024, -0.00006)`
+정도의 아주 작은 편향(bias)을 출력하고 있었다. 전체 39284 스텝에 대한
+residual(예측-정답) 평균도 x축에서 `+0.00022`로, action의 표준편차 대비
+4.6%밖에 안 되는 작은 값이라 학습 중엔 MSE에 거의 안 보였다.
+
+문제는 이 컨트롤러가 매 제어 스텝마다 `ctrl`에 행동을 그냥 더해서
+"누적"시키는 구조라는 것 — 즉 정지-상태 편향은 속도 명령의 offset처럼
+작용해서, 130~400스텝에 걸쳐 그대로 적분(누적)된다. `0.00022 x 400 ≈
+0.088m`, hole clearance(3mm)나 성공 오프셋 범위(9~14mm)보다 훨씬 큰
+drift라서 peg가 아예 딴 곳으로 밀려나 버린 것이다. **검증 데이터에서의
+낮은 MSE가 실제 폐루프(closed-loop) 배포 성능을 보장하지 않는다**는 걸
+직접 겪은 셈이다.
+
+**고친 방법**: `AdmittancePolicy`의 모든 `Linear`에 `bias=False`를 주고
+활성화를 홀함수인 `Tanh`(tanh(0)=0)만 쓰면, 네트워크 구조상
+`f(0)=(0,0)`이 항상 정확히 보장된다. 정규화도 평균을 빼지 않고
+표준편차로 스케일만 해서, "힘=0"이 정규화된 입력 공간에서도 여전히
+정확히 0이 되도록 맞췄다. 재학습 후:
+
+| | 성공률 |
+|---|---|
+| admittance controller (원본 공식, 시드42/123) | 100.0% / 99.3% |
+| 학습된 정책 (수정 전, bias 있는 MLP) | 0.5% / 0.3% |
+| 학습된 정책 (수정 후, bias-free + f(0)=0) | **100.0% / 100.0%** |
+
+수정 후에는 손으로 짠 admittance 공식과 사실상 동일한 성능까지
+따라잡았다 — 즉 "시연 데이터만으로 admittance 법칙을 신경망에 재현시키는
+것"은 구조적 제약(f(0)=0)만 지켜지면 실제로 된다는 걸 확인했다.
+
+**한계**: 지금 이 정책은 손으로 짠 공식을 재현한 것 이상은 아니다(입력이
+force 상태뿐이라 admittance controller가 가진 정보 이상을 배울 수 없다).
+진짜 가치는 여기서부터 시작된다 — 이 정책을 RL(PPO 등) 파인튜닝의 초기
+정책으로 써서, force 상태보다 더 풍부한 관측(예: peg 자세, wrist 정렬
+오차)까지 반영하는 더 일반적인 정책으로 확장하는 게 다음 단계다.
+
 ## 지금 임시로 되어있는/한계인 부분
 
 - **wrist(회전) misalignment는 보정하지 않음**: admittance controller가 xy

@@ -4,3 +4,4 @@ cma>=3.3.0
 matplotlib>=3.7.0
 imageio>=2.31.0
 imageio-ffmpeg>=0.4.9
+torch>=2.0.0  # bootstrap/ (행동 복제 정책 학습)에만 필요
